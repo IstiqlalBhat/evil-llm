@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neuron explorer guide</title>
+<link rel="icon" href="data:,">
+<style>
+/* the explorer's own tokens (neuron-explorer/explorer/static/style.css) */
+:root {
+  --bg: #000; --panel: #0c0e10; --raise: rgba(255,255,255,0.06); --ink: #d4d4d4; --bright: #f2f2f2;
+  --dim: #8c8c8c; --line: #262626; --up: #ffb547; --down: #ff4f9a; --link: #38c8ff;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 var(--font); }
+main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font-size: 28px; line-height: 1.25; color: var(--bright); margin: 0 0 8px; font-weight: 600; }
+h2 { font-size: 20px; color: var(--bright); margin: 64px 0 6px; font-weight: 600; }
+h3 { font-size: 15px; color: var(--bright); margin: 24px 0 4px; font-weight: 600; }
+p, li { max-width: 72ch; }
+p { margin: 8px 0; }
+ol, ul { padding-left: 22px; margin: 8px 0; }
+li { margin: 4px 0; }
+b { color: var(--bright); font-weight: 600; }
+code, .k { font-family: var(--mono); font-size: 0.88em; background: var(--raise); border-radius: 4px; padding: 1px 6px; color: var(--bright); }
+.lede { color: var(--dim); font-size: 17px; max-width: 64ch; }
+.up { color: var(--up); } .down { color: var(--down); } .link { color: var(--link); }
+
+figure { margin: 20px 0; }
+.shot { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.shot img { display: block; width: 100%; height: auto; }
+figcaption { color: var(--dim); font-size: 13px; margin-top: 8px; }
+.pin {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--link); color: #000; font: 700 14px/1 var(--font);
+  box-shadow: 0 0 0 4px rgba(0,0,0,0.6);
+}
+.legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; margin-top: 24px; }
+.legend > div { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
+.legend .pin { position: static; transform: none; box-shadow: none; }
+.legend h3 { margin: 2px 0 4px; }
+.legend ul { padding-left: 18px; color: var(--ink); }
+
+.task { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px; align-items: start; margin-top: 16px; }
+.task figure { margin: 0; }
+
+/* a fires row, taken apart */
+.anatomy { margin: 20px 0 8px; padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+.row { display: flex; gap: 20px; align-items: flex-start; }
+.part { display: flex; flex-direction: column; gap: 8px; min-width: max-content; }
+.part .v { font: 15px/1.4 var(--mono); white-space: nowrap; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+.part .l { font: 12px/1.35 var(--font); color: var(--dim); white-space: nowrap; }
+
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); font-weight: 500; }
+td.out { font-family: var(--mono); font-size: 13px; color: var(--bright); }
+
+dl { display: grid; grid-template-columns: 170px 1fr; gap: 10px 24px; margin: 16px 0; }
+dt { color: var(--bright); font-weight: 600; }
+dd { margin: 0; max-width: 72ch; }
+
+.note { border-left: 2px solid var(--line); padding: 2px 0 2px 16px; color: var(--dim); margin: 16px 0; }
+
+@media (max-width: 760px) {
+  main { padding-top: 32px; }
+  .legend, .task { grid-template-columns: 1fr; }
+  dl { grid-template-columns: 1fr; gap: 2px; }
+  dd { margin-bottom: 12px; }
+  .pin { width: 22px; height: 22px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Using the neuron explorer</h1>
+  <p class="lede">Qwen3.5-4B has 32 layers, and each layer has 9,216 neurons. The explorer lets you see which ones react to your text, look up what each one does, and push one up or down to watch the model's answers change.</p>
+  <p>Open <a class="link" href="http://localhost:8791">localhost:8791</a>. The screenshots below are the real app on this Mac.</p>
+
+  <h2>The screen</h2>
+  <figure>
+    <div class="shot">
+      <img src="3-neuron.png" alt="The explorer with neuron L3 N7957 open: top bar, a left list of neurons, the 3D layer map in the middle, and the neuron's details on the right">
+      <span class="pin" style="left:77%;top:2.6%">1</span>
+      <span class="pin" style="left:27.6%;top:7.8%">2</span>
+      <span class="pin" style="left:44%;top:34%">3</span>
+      <span class="pin" style="left:57.3%;top:7.8%">4</span>
+    </div>
+    <figcaption>Neuron L3 N7957 open, after running "The Golden Gate Bridge in San Francisco" through fires.</figcaption>
+  </figure>
+
+  <div class="legend">
+    <div><span class="pin">1</span><div>
+      <h3>Top bar</h3>
+      <ul>
+        <li><b>lens / fires</b> switches what the search box does. <b>lens</b> finds neurons by word; <b>fires</b> runs your text through the model.</li>
+        <li>The <code>L22 N2742</code> box jumps to a neuron: type a layer and number, then Enter.</li>
+        <li><b>web</b> draws the open neuron's links across layers; the number sets how many links each way.</li>
+        <li><b>writes / index</b> arranges each sheet: neurons with similar effects side by side, or in number order.</li>
+      </ul>
+    </div></div>
+    <div><span class="pin">2</span><div>
+      <h3>Left panel</h3>
+      <ul>
+        <li><b>run</b> shows the fires results for your text.</li>
+        <li><b>net</b> shows lens search results, or the open neuron's links.</li>
+        <li>Click any row to open that neuron. <code>‹</code> hides the panel.</li>
+      </ul>
+    </div></div>
+    <div><span class="pin">3</span><div>
+      <h3>The map</h3>
+      <ul>
+        <li>Each white sheet is one layer: layer 0 at the far left, layer 31 nearest you on the right. Each dot is a neuron.</li>
+        <li>Drag to rotate, scroll to zoom. Hover a dot for a quick summary; click it to open it.</li>
+        <li>Click a layer's label to look at that sheet face-on. The button at the top takes you back to all layers.</li>
+        <li><span class="up">Orange</span> lines push the next neuron up, <span class="down">pink</span> lines push it down.</li>
+      </ul>
+    </div></div>
+    <div><span class="pin">4</span><div>
+      <h3>Neuron panel</h3>
+      <ul>
+        <li><b>Details</b>: which words the neuron promotes, and which neurons it feeds or is fed by.</li>
+        <li><b>Chat</b>: ask the model something with this neuron pushed up, untouched, and pushed down, side by side.</li>
+        <li><b>Claude</b>: an assistant that can run the explorer for you (see the note at the end).</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <h2>See which neurons fire on your text</h2>
+  <div class="task">
+    <div>
+      <ol>
+        <li>Click <b>fires</b> in the top bar.</li>
+        <li>Type or paste text into the box on the left and press Enter. The model reads it once.</li>
+        <li>The list shows every neuron that fired unusually hard, strongest first.</li>
+        <li>Your text appears as word chips under the box. Hover one to preview it; click one to keep only the neurons that fired on that word. The map lights them up.</li>
+        <li>Narrow the list with the filters:
+          <ul>
+            <li><code>L 0 – 31</code> limits it to a range of layers.</li>
+            <li><code>±</code> <code>+</code> <code>−</code> shows both directions, or only one.</li>
+            <li><code>≥ 1.0</code> is the minimum score. Raise it to see only the strongest.</li>
+            <li><code>lens has…</code> keeps neurons whose lens contains a word.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+    <figure>
+      <div class="shot"><img src="2-fires.png" alt="Fires results for the word San: 206 neurons pass, led by L23 N7636 at 14.3 times"></div>
+      <figcaption>The " San" chip is selected: 206 neurons pass.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Reading one row</h3>
+  <div class="anatomy">
+    <div class="row">
+      <div class="part"><span class="v">L3 N7957</span><span class="l">layer 3, neuron 7957</span></div>
+      <div class="part"><span class="v up">9.1×</span><span class="l">score</span></div>
+      <div class="part"><span class="v">" San"</span><span class="l">word that set it off</span></div>
+      <div class="part"><span class="v">Saint saint 尝 St Saint _st</span><span class="l">words it pushes the model toward (its lens)</span></div>
+    </div>
+  </div>
+  <p>The score compares this activation with the neuron's usual peak on ordinary web text. <span class="up">9.1×</span> means nine times higher than it normally gets. A <span class="down">pink, negative score</span> means it went unusually far below zero.</p>
+  <p class="note">Strings in the lens are often fragments or other languages, like <code>ctu lec # ctions</code>. Many neurons mix several unrelated jobs, so a clean row like this one is the lucky case.</p>
+
+  <h2>Find neurons for a word or idea</h2>
+  <div class="task">
+    <div>
+      <ol>
+        <li>Click <b>lens</b> in the top bar.</li>
+        <li>Type a word, such as <code>bridge</code>. The search runs as you type.</li>
+        <li>The left panel lists every neuron whose lens contains it. "bridge" finds 347.</li>
+        <li><span class="up">+</span> means pushing the neuron up makes the model more likely to say the word. <span class="down">−</span> means pushing it down does. The number after it is the word's rank in that list.</li>
+      </ol>
+      <p>This works without running any text, so it's the quickest way to find a starting point.</p>
+    </div>
+    <figure>
+      <div class="shot"><img src="5-lens.png" alt="Lens search for bridge listing 347 neurons, led by L27 N7343"></div>
+    </figure>
+  </div>
+
+  <h2>Work out what one neuron does</h2>
+  <p>Open a neuron by clicking it in any list, on the map, or with the jump box.</p>
+  <h3>Details tab</h3>
+  <ul>
+    <li><b>steer lens</b>: the words that become more likely when the neuron is pushed. This is measured by actually running the model, so it's the best single clue. <b>KL</b> is how much the push changes the model's next-word guesses overall; higher means a stronger effect.</li>
+    <li><b>logit lens</b>: the words its output points at directly, ignoring every later layer. Faster but rougher.</li>
+    <li><b>connections</b>: <b>writes into</b> lists the later neurons it feeds; <b>driven by</b> lists the earlier ones that feed it. <span class="up">↑</span> excites, <span class="down">↓</span> suppresses, and the number is the link's strength. Click one to follow it.</li>
+  </ul>
+
+  <h3>Chat tab: test your guess</h3>
+  <div class="task">
+    <div>
+      <p>Type a question and press <b>run</b>. You get three answers side by side: neuron pushed up, untouched (0), and pushed down. Earlier turns stay in the conversation.</p>
+      <ul>
+        <li><b>add</b> pushes the neuron by a fixed amount (the dose) at every word. <b>×</b> multiplies what it already does; <code>×0</code> switches it off.</li>
+        <li><b>− 2 +</b> sets the dose. Start low and step up.</li>
+        <li><b>reads you</b> skips generation: it colours each word of your text by how strongly this neuron reacts to it.</li>
+      </ul>
+    </div>
+    <figure>
+      <div class="shot"><img src="4-chat.png" alt="Steered chat with L3 N7957 at dose 2: the pushed-up column repeats Saint, the untouched column answers Los Angeles"></div>
+    </figure>
+  </div>
+
+  <p>"Name a famous city in California." with the L3 N7957 neuron at three doses:</p>
+  <table>
+    <thead><tr><th>dose</th><th>pushed up</th><th>pushed down</th></tr></thead>
+    <tbody>
+      <tr><td>0.8</td><td class="out">Los Angeles</td><td class="out">**Los Angeles** is a famous city in California…</td></tr>
+      <tr><td>2</td><td class="out">Saint. Saint. Saint. Saint. Saint…</td><td class="out">The question asks: What is a famous city in California.</td></tr>
+      <tr><td>4</td><td class="out">Johns. John. John. . . .</td><td class="out">The time are The time are The The…</td></tr>
+    </tbody>
+  </table>
+  <p>At 0.8 the change is barely visible. At 2 the neuron's idea, "Saint", takes over. At 4 the model falls apart, though "John" still hints at Saint John. If nothing changes, raise the dose. If everything turns to noise, lower it.</p>
+
+  <h2>Words you'll see</h2>
+  <dl>
+    <dt>Neuron <code>L3 N7957</code></dt><dd>Unit 7957 in layer 3's feed-forward block. Early layers tend to react to the words themselves; later layers more to meaning and what to say next.</dd>
+    <dt>Activation</dt><dd>How strongly a neuron responds at one word. It can go positive or negative.</dd>
+    <dt>Score <code>9.1×</code></dt><dd>Activation divided by that neuron's usual peak, so neurons with different ranges can be compared.</dd>
+    <dt>Steer lens</dt><dd>Words that get likelier when you push the neuron up (left column) or down (right column).</dd>
+    <dt>Logit lens</dt><dd>Words the neuron's output points to directly, before later layers change anything.</dd>
+    <dt>KL</dt><dd>How much a push changes the model's next-word predictions. Bigger means more influence.</dd>
+    <dt>Dose</dt><dd>How hard you push in Chat. It defaults to 0.8; step it up until the answer changes, and back off when it turns to noise.</dd>
+    <dt>Web</dt><dd>The chain of strongest links into and out of the open neuron across all layers.</dd>
+    <dt>Heads</dt><dd>The thin lines between sheets are attention heads, the parts that move information between words. Click one to open it.</dd>
+  </dl>
+
+  <h2>What isn't available here</h2>
+  <ul>
+    <li>The <b>Examples</b> tab, <b>embeddings</b> view, neuron names and the default neuron ranking need sweep data that's generated on a CUDA GPU server. The repo doesn't include it, so those stay empty.</li>
+    <li>The <b>Claude</b> tab runs the <code>claude</code> command-line tool on this Mac with access to your home folder and a shell. Only use it if you're comfortable with that.</li>
+    <li>If the top-right corner says <code>loading</code>, the model is still starting up. Opening neurons, hover and fires wait until it's gone.</li>
+  </ul>
+</main>
+</body>
+</html>

@@ -1,0 +1,124 @@
+diff --git a/explorer/static/map3d.js b/explorer/static/map3d.js
+index e5ae9c8..8251cf2 100644
+--- a/explorer/static/map3d.js
++++ b/explorer/static/map3d.js
+@@ -46,8 +46,11 @@ function glowPoints(sizePx, maxScale = 3) {
+   });
+ }
+ 
+-export function createMap(canvas, labelsDiv, arch, cb) {
+-  const L = arch.n_layers, N = arch.inter;
++// opts (the chat UI's live view): homeDir [x, y, z] the camera looks from, fit (share of the view the model fills),
++// markSize (px of marked points), idle (brightness of unmarked neurons, 1 = as in the explorer), glass (opacity of the
++// attention slabs and their edges, 1 = as in the explorer), up ([r, g, b] of marked neurons firing up)
++export function createMap(canvas, labelsDiv, arch, cb, opts = {}) {
++  const L = arch.n_layers, N = arch.inter, idle = PAL.idle.clone().multiplyScalar(opts.idle ?? 1), glass = opts.glass ?? 1;
+   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+   renderer.setClearColor(PAL.bg);
+@@ -60,7 +63,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+   let fitPerPx = null;
+   const camera = new THREE.PerspectiveCamera(32, 1, 0.02, 2000);
+   let homeDist = 60;
+-  const home = { target: new THREE.Vector3((L - 1) * GAP / 2, SHEET_Y0 + SHEET / 2 - 0.4, 0), dir: new THREE.Vector3(0.62, 0.4, 1).normalize() };
++  const home = { target: new THREE.Vector3((L - 1) * GAP / 2, SHEET_Y0 + SHEET / 2 - 0.4, 0), dir: new THREE.Vector3(...(opts.homeDir || [0.62, 0.4, 1])).normalize() };
+   camera.position.copy(home.target).addScaledVector(home.dir, homeDist);
+   const controls = new OrbitControls(camera, canvas);
+   controls.target.copy(home.target);
+@@ -83,7 +86,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+   for (let l = 0; l < L; l++) for (let n = 0; n < N; n++) {
+     const p = neuronPos(l, n), k = (l * N + n) * 3;
+     pos[k] = p.x; pos[k + 1] = p.y; pos[k + 2] = p.z;
+-    PAL.idle.toArray(col, k);
++    idle.toArray(col, k);
+   }
+   const geo = new THREE.BufferGeometry();
+   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+@@ -108,7 +111,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+     seg(V(ax, 0, 0), V(ax, SHEET_Y0, 0)); seg(V(mx, 0, 0), V(mx, SHEET_Y0, 0));
+     const full = arch.layer_types[l] === "full_attention", t = full ? 0.3 : 0.1;
+     const slab = new THREE.Mesh(new THREE.BoxGeometry(t, SHEET * 0.92, SHEET * 0.92), new THREE.MeshBasicMaterial({
+-      color: full ? 0x8fa6b2 : 0x6f8590, transparent: true, opacity: (full ? 0.075 : 0.045) * BRIGHT, depthWrite: false }));
++      color: full ? 0x8fa6b2 : 0x6f8590, transparent: true, opacity: (full ? 0.075 : 0.045) * BRIGHT * glass, depthWrite: false }));
+     slab.position.set(ax, SHEET_Y0 + SHEET / 2, 0);
+     slab.userData = { layer: l, full };
+     scene.add(slab); slabs.push(slab);
+@@ -249,7 +252,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+   const headMid = (layer, head) => { const i = (headStart[layer] + head) * 6;
+     return new THREE.Vector3((headPos[i] + headPos[i + 3]) / 2, (headPos[i + 1] + headPos[i + 4]) / 2, (headPos[i + 2] + headPos[i + 5]) / 2); };
+   const markGeo = new THREE.BufferGeometry();
+-  const markPts = new THREE.Points(markGeo, glowPoints(4, 2));
++  const markPts = new THREE.Points(markGeo, glowPoints(opts.markSize || 4, 2));
+   markPts.frustumCulled = false; markPts.renderOrder = 1;
+   scene.add(markPts);
+ 
+@@ -315,20 +318,27 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+   // annotations: short HTML labels pinned to neurons, re-projected every frame (Claude points things out with these)
+   let notes = [];
+   function placeNotes() {
+-    const w = canvas.clientWidth, h = canvas.clientHeight;
++    const w = canvas.clientWidth, h = canvas.clientHeight, shown = [];
+     for (const a of notes) {
+-      const v = neuronPos(a.layer, a.n).project(camera);
+-      a.el.style.display = v.z > 1 || layerMode !== null && a.layer !== layerMode ? "none" : "";
+-      a.el.style.left = `${(v.x + 1) / 2 * w}px`; a.el.style.top = `${(1 - v.y) / 2 * h}px`;
++      const v = neuronPos(a.layer, a.n).project(camera), x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h;
++      // a label that would overlap one placed before it (earlier notes win) is hidden; its box is estimated from its
++      // text, which is cheaper than measuring it every frame; one that would run off the right edge goes on the left (flip)
++      const tw = a.text.length * 6.6 + 18, left = a.left || x + tw + 12 > w, box = left ? [x - tw - 12, y - 11, x, y + 11] : [x, y - 11, x + tw + 12, y + 11];
++      a.el.classList.toggle("flip", left && !a.left);
++      const clash = shown.some(b => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3]);
++      const off = v.z > 1 || layerMode !== null && a.layer !== layerMode || clash;
++      a.el.style.display = off ? "none" : "";
++      if (!off) shown.push(box);
++      a.el.style.left = `${x}px`; a.el.style.top = `${y}px`;
+     }
+   }
+   function setNotes(items) {
+     for (const a of notes) a.el.remove();
+     notes = (items || []).map(it => {
+       // a zero-size anchor at the neuron: the ring is centred on it, the text sits to its right
+-      const el = document.createElement("div"); el.className = "note";
++      const el = document.createElement("div"); el.className = it.cls ? `note ${it.cls}` : "note";
+       const t = document.createElement("span"); t.textContent = it.text || `L${it.layer} N${it.n}`; el.appendChild(t);
+-      labelsDiv.appendChild(el); return { layer: it.layer, n: it.n, el };
++      labelsDiv.appendChild(el); return { layer: it.layer, n: it.n, el, text: t.textContent, left: !!it.left };
+     });
+     render();
+   }
+@@ -354,7 +364,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+       // distance at which the model's bounding sphere fits the visible gap, then place the camera there once
+       const center = home.target, r = Math.max(...bounds.map(b => b.distanceTo(center)));
+       const vHalf = THREE.MathUtils.degToRad(camera.fov / 2), hHalf = Math.atan(Math.tan(vHalf) * availW / h);
+-      homeDist = r / Math.sin(Math.min(vHalf, hHalf)) * 0.82;
++      homeDist = r / Math.sin(Math.min(vHalf, hHalf)) * (opts.fit || 0.82);
+       camera.position.copy(home.target).addScaledVector(home.dir, homeDist);
+       controls.update();
+       fitPerPx = homeDist;
+@@ -496,7 +506,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+     fade.fx = fx; fade.fw = fw; fade.amt = amt; fade.side = side;
+     for (const slab of slabs) {
+       const d = (slab.position.x - fx) / fw, f = 1 - amt * (1 - Math.exp(-d * d));
+-      slab.material.opacity = slab.userData.baseOpacity * f; slab.userData.edges.material.opacity = f;
++      slab.material.opacity = slab.userData.baseOpacity * f; slab.userData.edges.material.opacity = f * glass;
+     }
+     for (let l = 0; l < L; l++) {
+       const d = (layerX(l) + MLP_DX - fx) / fw;
+@@ -564,7 +574,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+     setNeuronHeads(list) { neuronHeads = list || []; refreshHighlights(); },
+     // the swept neurons' colours show on one layer at a time (the current one); the others go back to idle
+     setUnits(layer, units) {
+-      if (unitsLayer !== null && unitsLayer !== layer) for (let n = 0; n < N; n++) PAL.idle.toArray(col, (unitsLayer * N + n) * 3);
++      if (unitsLayer !== null && unitsLayer !== layer) for (let n = 0; n < N; n++) idle.toArray(col, (unitsLayer * N + n) * 3);
+       unitsLayer = layer;
+       dataLayers.add(layer);
+       labels[layer].material.userData.base = 1; labels[layer].material.color.set(0xffffff);
+@@ -629,7 +639,7 @@ export function createMap(canvas, labelsDiv, arch, cb) {
+     home() { flyTo(home.target, homeDist); },
+     setMarks(marks) {
+       lastMarks = marks;
+-      const p = [], c = [], up = new THREE.Color(1.0, 0.71, 0.28), down = new THREE.Color(1.0, 0.31, 0.6);
++      const p = [], c = [], up = new THREE.Color(...(opts.up || [1.0, 0.71, 0.28])), down = new THREE.Color(1.0, 0.31, 0.6);
+       for (const m of marks) {
+         const v = neuronPos(m.layer, m.n), k = (m.sign === "-" ? down : up).clone().multiplyScalar(m.w ?? 1);
+         p.push(v.x, v.y, v.z); c.push(k.r, k.g, k.b);

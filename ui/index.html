@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local LLM</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<!-- optional: without the CDN, replies show as plain text -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<!-- for the Evil neuron map (the explorer's map3d.js, served by the evil server) -->
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+}}
+</script>
+<style>
+:root {
+  --bg: #EEF0F3; --surface: #FFFFFF; --ink: #1B1F2A; --muted: #5A6170;
+  --line: #D3D7DE; --accent: #5B4FE0; --on-accent: #FFFFFF; --think: #E7E5F8;
+  --up: #2E9E6A; --down: #C9413A;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171C; --surface: #1E2128; --ink: #E6E8EC; --muted: #9AA0AC;
+    --line: #2E323B; --accent: #9C94FF; --on-accent: #15171C; --think: #23213A;
+    --up: #4CC38A; --down: #F0716A;
+  }
+}
+/* Evil: the page goes oxblood and bone, with a red glow that beats like a heart while Evil LLM writes. Plain type
+   only, so it stays readable. Dark whatever the system theme. */
+body.evil {
+  --bg: #1C090C; --surface: #2B1014; --ink: #EADFCB; --muted: #A78B84; --line: #4C1D24;
+  --accent: #A50D25; --on-accent: #F3E9D6; --think: #2A0F13; --down: #FF7A6E;
+  --blood: #E0243B; --focus: #E0243B;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  height: 100dvh; /* the visible height, so phone toolbars don't cover the message box */
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.5 "Instrument Sans", system-ui, sans-serif;
+  transition: background-color 0.7s ease, color 0.7s ease;
+}
+@keyframes heartbeat { 0%, 45%, 100% { opacity: 1; } 12% { opacity: 0.55; } 28% { opacity: 0.8; } }
+@media (prefers-reduced-motion: reduce) { body { transition: none; } }
+body.evil .calm, body:not(.evil) .wicked { display: none; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
+
+header { border-bottom: 1px solid var(--line); }
+.bar { display: flex; align-items: center; gap: 16px; max-width: 760px; margin: 0 auto; padding: 10px 16px; flex-wrap: wrap; }
+.bar h1 { display: flex; align-items: center; gap: 8px; margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+.bar h1 small { color: var(--muted); font-weight: 400; }
+.mark { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--blood); text-shadow: 0 0 18px rgba(224, 36, 59, 0.6); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.up { background: var(--up); }
+.dot.down { background: var(--down); }
+.bar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.bar input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+.ghost { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.ghost:hover { border-color: var(--muted); }
+.controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.controls[hidden] { display: none; }
+.controls:not([hidden]) { animation: controls-in 0.25s ease-out; }
+@keyframes controls-in { from { opacity: 0; transform: translateX(10px); } }
+.icon { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
+.icon svg { width: 16px; height: 16px; transition: transform 0.3s ease; }
+#controlsBtn[aria-expanded="false"] svg { transform: rotate(180deg); }
+@media (max-width: 700px) { .controls { order: 1; width: 100%; } } /* their own row, the toggle stays top right */
+@media (prefers-reduced-motion: reduce) { .controls:not([hidden]) { animation: none; } .icon svg { transition: none; } }
+#sys { max-width: 760px; margin: 0 auto; padding: 0 16px 12px; }
+#sys[hidden] { display: none; }
+#sys textarea { width: 100%; min-height: 64px; resize: vertical; }
+
+main { flex: 1; overflow-y: auto; }
+#log { max-width: 760px; margin: 0 auto; padding: 24px 16px 16px; }
+.empty { color: var(--muted); margin-top: 18vh; text-align: center; }
+.empty strong { display: block; color: var(--ink); font: 600 26px/1.3 "Source Serif 4", Georgia, serif; margin-bottom: 4px; }
+body.evil .empty { max-width: 36ch; margin-inline: auto; font-size: 16px; }
+body.evil .empty strong { margin-bottom: 16px; font: 700 clamp(44px, 8vw, 72px)/1.05 "Instrument Sans", system-ui, sans-serif; letter-spacing: -0.03em;
+  color: var(--blood); text-shadow: 0 0 40px rgba(224, 36, 59, 0.45); }
+
+.user {
+  width: fit-content; max-width: 85%; margin: 28px 0 12px auto; padding: 8px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px 14px 4px 14px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.bot { font: 17px/1.65 "Source Serif 4", Georgia, serif; overflow-wrap: anywhere; }
+.bot .text > :first-child { margin-top: 0; }
+.bot .text.plain { white-space: pre-wrap; }
+.bot pre { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.bot code { font: 0.82em/1.5 "JetBrains Mono", ui-monospace, monospace; }
+.bot table { border-collapse: collapse; font-size: 15px; }
+.bot th, .bot td { border: 1px solid var(--line); padding: 4px 8px; }
+/* Evil LLM's replies: plain and readable, with a blood-red rule down the side */
+.bot.evil { padding-left: 16px; border-left: 2px solid var(--blood); font: 17px/1.7 "Instrument Sans", system-ui, sans-serif; }
+.bot.evil :is(h1, h2, h3) { color: var(--blood); }
+.bot.evil strong { color: #F6EBD7; }
+.thought { margin-bottom: 10px; font: 14px/1.5 "Instrument Sans", system-ui, sans-serif; color: var(--muted); }
+.thought summary { cursor: pointer; width: fit-content; }
+.thought > div { margin-top: 6px; padding: 10px 12px; background: var(--think); border-radius: 8px; white-space: pre-wrap; max-height: 320px; overflow-y: auto; }
+.stats { margin-top: 6px; color: var(--muted); font: 13px/1.4 "Instrument Sans", system-ui, sans-serif; }
+.error { color: var(--down); }
+
+footer { border-top: 1px solid var(--line); background: var(--bg); }
+body.evil footer { background: transparent; }
+form { display: flex; gap: 8px; align-items: flex-end; max-width: 760px; margin: 0 auto; padding: 12px 16px 16px; }
+textarea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+}
+#input { flex: 1; resize: none; max-height: 40vh; line-height: 1.45; }
+#input:focus, #sys textarea:focus { outline: none; border-color: var(--focus, var(--accent)); }
+#send, #gateGo {
+  background: var(--accent); color: var(--on-accent); border: 0; border-radius: 12px;
+  padding: 10px 18px; font-weight: 600; cursor: pointer;
+}
+#send:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 520px) { .bar h1 small { display: none; } }
+
+/* live neurons, Evil only: the explorer's 3D map, lit by the neurons the evil server reports on each token. The map
+   draws on black in both themes, so the panel keeps its own light-on-dark colours. */
+:root { --brain: max(440px, calc(100vw - 680px)); --b-ink: #EADFCB; --b-muted: #A78B84; --b-glass: rgba(30, 8, 12, 0.86);
+  --pushed: #FF4058; }
+#brain { display: none; height: 320px; flex: none; flex-direction: column; background: #000; color: var(--b-ink); }
+body.evil #brain { display: flex; }
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#map3d, #notes, #path { position: absolute; inset: 0; width: 100%; height: 100%; }
+#map3d { display: block; touch-action: none; }
+#notes, #path { pointer-events: none; }
+#notes .note { position: absolute; width: 0; height: 0; }
+#notes .note::before { content: ""; position: absolute; left: -7px; top: -7px; width: 10px; height: 10px; border: 2px solid var(--pushed); border-radius: 50%; }
+#notes .note span { position: absolute; left: 12px; top: 0; transform: translateY(-50%); white-space: nowrap; padding: 2px 7px;
+  background: var(--b-glass); border-left: 2px solid var(--pushed); border-radius: 4px; font-size: 12px; }
+/* the tampered pair: a ring each, one label between them; and where your message goes in, quieter and to the left */
+#notes .quiet span { display: none; }
+#notes .end::before { display: none; }
+#notes .word::before { left: -3px; top: -3px; width: 6px; height: 6px; border: 0; background: var(--pushed); }
+#notes .word span { left: 8px; padding: 1px 6px; border-left: 0; color: #FFD3D9; font-size: 11px; }
+#notes .flip span { left: auto; right: 12px; } #notes .word.flip span { right: 8px; } /* would run off the edge */
+#notes .end span { left: auto; right: 18px; background: none; border: 0; color: var(--b-muted); }
+.brain-head { position: absolute; top: 12px; left: 12px; max-width: calc(100% - 140px); padding: 10px 14px; background: var(--b-glass); border-radius: 10px; pointer-events: none; }
+#brain h2 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1.25; color: var(--pushed); }
+#now { margin: 2px 0 0; color: var(--b-muted); font-size: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#now b { color: var(--pushed); font-weight: 600; }
+#home { position: absolute; top: 12px; right: 12px; background: var(--b-glass); border-color: rgba(234, 223, 203, 0.25); color: var(--b-ink); font-size: 13px; }
+/* the next word, at the map's output end: what Evil LLM wrote when the tampering changed it, and what a normal AI would
+   have written; the red line runs to it from the tampered pair */
+#out { position: absolute; right: 14px; bottom: 14px; min-width: 130px; max-width: 42%; padding: 9px 14px; background: var(--b-glass);
+  border: 1px solid rgba(255, 64, 88, 0.4); border-radius: 10px; }
+#out[hidden] { display: none; }
+#out .tag { display: block; color: var(--b-muted); font-size: 11px; }
+#out b { display: block; color: var(--pushed); font-size: 24px; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
+#out .normal { display: block; margin-top: 2px; font-size: 13px; }
+#out.fresh { animation: rise 0.35s ease-out; }
+#path path { fill: none; stroke: var(--pushed); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 8 7; opacity: 0; transition: opacity 0.5s; }
+#path.on path { opacity: 0.9; animation: flow 0.8s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -15; } }
+.brain-head, #home, #notes, #path, #out { z-index: 1; }
+.below { flex: none; padding: 14px 20px 18px; border-top: 1px solid #4C1D24; background: #13060A; }
+.key { max-width: 72ch; margin: 0; color: var(--b-muted); font-size: 13px; }
+.key b { font-weight: 600; }
+.key .red { color: var(--pushed); }
+.busy { margin-top: 14px; }
+.busy h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.busy > p { margin: 2px 0 0; color: var(--b-muted); font-size: 13px; }
+.busy ol { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 24px; margin: 8px 0 0; padding: 0; }
+.busy li { border-top: 1px solid rgba(234, 223, 203, 0.1); }
+.busy button { display: grid; grid-template-columns: 84px 1fr; align-items: center; column-gap: 10px; width: 100%; padding: 5px 0;
+  background: none; border: 0; text-align: left; cursor: pointer; font-size: 14px; font-variant-numeric: tabular-nums; }
+.busy button:hover .id { color: var(--pushed); }
+.busy .meter { height: 6px; background: rgba(234, 223, 203, 0.1); border-radius: 3px; overflow: hidden; }
+.busy .meter i { display: block; height: 100%; background: var(--pushed); }
+.busy .words { grid-column: 2; color: var(--b-muted); font-size: 13px; }
+/* a fixed height, so the map above doesn't resize as the list fills in */
+.busy ol { height: 210px; overflow-y: auto; align-content: start; }
+.busy ol:empty::before { content: "Fills in as Evil LLM writes."; color: var(--b-muted); font-size: 13px; }
+.research { margin-top: 12px; color: var(--b-muted); font-size: 13px; }
+.research summary { width: fit-content; color: var(--b-ink); cursor: pointer; }
+.research p { max-width: 76ch; margin: 6px 0 0; line-height: 1.55; }
+#tip small { display: block; color: var(--b-muted); font-size: 11px; }
+#tip { position: fixed; z-index: 2; display: none; max-width: 280px; padding: 3px 8px; background: var(--b-glass); color: var(--b-ink); border-radius: 4px; font-size: 12px; pointer-events: none; }
+@media (min-width: 1100px) {
+  body.evil { padding-right: var(--brain); }
+  #brain { position: fixed; top: 0; right: 0; bottom: 0; width: var(--brain); height: auto; }
+}
+@media (max-width: 1099px) { #brain .below { display: none; } }
+
+/* Evil effects: the eye, the heartbeat trace, and the controls. Decoration only, behind or beside the text. A bloodshot
+   human eye, wet, in a dark socket: it blinks, its pupil widens while it writes, and on the empty page it follows you. */
+.wicked.mark { display: inline-flex; align-items: center; gap: 8px; }
+.eye-slot { display: inline-block; line-height: 0; }
+.mark .eye-slot { width: 30px; }
+.empty .eye-slot { width: min(240px, 62vw); margin-bottom: 18px; filter: drop-shadow(0 0 30px rgba(0, 0, 0, 0.95)); }
+.eye { display: block; width: 100%; height: auto; overflow: visible; }
+.eye .socket { fill: url(#socket); }
+.eye .fold { fill: none; stroke: #000; stroke-opacity: 0.45; stroke-width: 14; stroke-linecap: round; }
+.eye .pupil { fill: url(#pupilG); transform-box: fill-box; transform-origin: center; transition: transform 0.5s ease; }
+body.alive .eye .pupil { transform: scale(1.6); }
+.eye .look { transition: transform 0.18s ease-out; }
+.eye .shade { fill: url(#lidShade); }
+.eye .cover { fill: url(#skin); transform-box: view-box; animation: open 0.9s ease-out; }
+.eye.blink .cover { animation: blink 0.24s ease-in-out; }
+.eye .margin { fill: none; stroke: #6A3F36; stroke-opacity: 0.8; stroke-width: 3; stroke-linecap: round; }
+.eye .water { fill: none; stroke: #D4847E; stroke-opacity: 0.55; stroke-width: 1.6; stroke-linecap: round; }
+@keyframes open { from { transform: translateY(66px); } }
+@keyframes blink { 50% { transform: translateY(66px); } }
+
+/* waiting for the first word: a heartbeat trace */
+.ecg { display: inline-flex; align-items: center; gap: 8px; }
+.ecg svg { width: 72px; height: 16px; overflow: visible; }
+.ecg path { fill: none; stroke: var(--blood); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 0.35 0.65; animation: trace 1.3s linear infinite; filter: drop-shadow(0 0 4px rgba(224, 36, 59, 0.8)); }
+@keyframes trace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
+/* the send button: a blood gradient that shifts on hover, a glint that sweeps across, a press; it throbs as Stop */
+body.evil :is(#send, #gateGo) {
+  position: relative; overflow: hidden; isolation: isolate;
+  background: linear-gradient(120deg, #6E0615 0%, #C8102E 40%, #FF3B4E 62%, #8E0A1C 100%) 0% 50% / 240% 240%;
+  color: #FFF4EC; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(255, 110, 120, 0.35), 0 6px 18px -6px rgba(224, 36, 59, 0.7);
+  transition: background-position 0.5s ease, box-shadow 0.25s ease, transform 0.12s ease;
+}
+body.evil :is(#send, #gateGo)::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 236, 226, 0.45) 50%, transparent 65%);
+  transform: translateX(-120%); transition: transform 0.6s ease;
+}
+body.evil :is(#send, #gateGo):hover { background-position: 100% 50%; transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px rgba(255, 140, 150, 0.5), 0 10px 28px -6px rgba(255, 59, 78, 0.9); }
+body.evil :is(#send, #gateGo):hover::after { transform: translateX(120%); }
+body.evil :is(#send, #gateGo):active { transform: translateY(0) scale(0.96); }
+body.evil :is(#send, #gateGo).busy { animation: throb 1.3s ease-in-out infinite; }
+@keyframes throb { 0%, 45%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 110, 120, 0.35), 0 0 0 0 rgba(224, 36, 59, 0.7); }
+  14% { box-shadow: inset 0 0 0 1px rgba(255, 110, 120, 0.35), 0 0 0 9px rgba(224, 36, 59, 0); } }
+
+/* the other buttons glow on hover; the checkboxes fill with blood and pop */
+body.evil .ghost { background: linear-gradient(180deg, rgba(255, 236, 226, 0.05), rgba(255, 236, 226, 0)) #24090D; border-color: #5A1E26;
+  transition: border-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.12s; }
+body.evil .ghost:hover, body.evil #home:hover { border-color: var(--blood); color: #FFF4EC; box-shadow: 0 0 14px -2px rgba(224, 36, 59, 0.6); }
+body.evil .ghost:active { transform: scale(0.96); }
+body.evil .bar input[type=checkbox] { appearance: none; display: grid; place-content: center; width: 16px; height: 16px;
+  border: 1.5px solid #7A2A33; border-radius: 4px; background: #1A0709; cursor: pointer; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s; }
+body.evil .bar input[type=checkbox]::before { content: ""; width: 9px; height: 9px; background: #FFF4EC; transform: scale(0);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); transition: transform 0.18s cubic-bezier(0.3, 1.6, 0.6, 1); }
+body.evil .bar input[type=checkbox]:checked { background: linear-gradient(135deg, #C8102E, #FF3B4E); border-color: #FF3B4E; box-shadow: 0 0 10px rgba(224, 36, 59, 0.6); }
+body.evil .bar input[type=checkbox]:checked::before { transform: scale(1); }
+body.evil #input { caret-color: var(--blood); transition: border-color 0.2s, box-shadow 0.2s; }
+body.evil #input:focus { box-shadow: 0 0 0 3px rgba(224, 36, 59, 0.18), 0 0 24px -6px rgba(224, 36, 59, 0.55); }
+body.evil .user { background: linear-gradient(180deg, #301116, #250B10); border-color: #5A1E26; }
+
+/* the shared demo asks for a name before anyone can chat, and says what's recorded */
+#gate { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px;
+  background: rgba(14, 4, 6, 0.86); backdrop-filter: blur(6px); }
+#gate[hidden] { display: none; }
+.gate-card { width: min(380px, 100%); padding: 28px 24px 22px; text-align: center; background: #22090D;
+  border: 1px solid #5A1E26; border-radius: 14px; box-shadow: 0 0 60px -12px rgba(224, 36, 59, 0.55); }
+.gate-card .eye-slot { width: 130px; margin-bottom: 10px; filter: drop-shadow(0 0 16px rgba(0, 0, 0, 0.9)); }
+.gate-card h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: var(--blood); }
+.gate-card p { margin: 0; color: var(--muted); }
+.gate-card form { display: flex; gap: 8px; margin: 18px 0 14px; }
+#gateName { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 12px; caret-color: var(--blood); }
+#gateName:focus { outline: none; border-color: var(--blood); box-shadow: 0 0 0 3px rgba(224, 36, 59, 0.18); }
+
+/* Horror, Evil only: eyes open in the dark and watch you, blood seeps from under the header and from each reply, a black
+   widow comes down while you sit still, the dark closes in when you stop, sending splatters, and your name is written in
+   blood. Nothing flashes, and reduced motion turns it all off. */
+header { position: relative; z-index: 3; }
+
+/* the room: a grimy wall in the dark with blood on it, lit only by a torch (your pointer or finger, or a light that
+   wanders when you're still), under old-film grain. The wall and its marks are drawn once; only the torch moves. */
+#scene, #grain { display: none; }
+body.evil #scene { display: block; position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #050102; }
+.wall { position: absolute; inset: 0; will-change: transform; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='700'%3E%3Cfilter id='c' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' seed='9' stitchTiles='stitch' result='g'/%3E%3CfeDiffuseLighting in='g' surfaceScale='1.8' lighting-color='%23BBA49C' result='l'%3E%3CfeDistantLight azimuth='235' elevation='55'/%3E%3C/feDiffuseLighting%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.008' numOctaves='3' seed='3' stitchTiles='stitch' result='s'/%3E%3CfeColorMatrix in='s' values='0 0 0 0 .22 0 0 0 0 .02 0 0 0 0 .03 2.2 0 0 0 -.95' result='st'/%3E%3CfeBlend in='st' in2='l' mode='multiply' result='m'/%3E%3CfeColorMatrix in='m' values='.5 0 0 0 0 0 .38 0 0 0 0 0 .36 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='700' height='700' filter='url(%23c)'/%3E%3C/svg%3E") 0 0 / 700px; }
+.scrawl { position: absolute; inset: 0; will-change: transform; }
+.scrawl > svg { position: absolute; overflow: visible; }
+.scrawl text { font-family: "Instrument Sans", system-ui, sans-serif; font-weight: 600; letter-spacing: 0.04em; }
+.light { position: absolute; left: 0; top: 0; width: 400px; height: 400px; margin: -200px 0 0 -200px; will-change: transform; }
+.blackout { position: absolute; inset: 0; background: #000; opacity: 0; }
+.blackout.flicker { animation: flicker 1.1s steps(1) forwards; } /* the torch cuts out: twice in a second at most, never a flash */
+@keyframes flicker { 0% { opacity: 0.88; } 14% { opacity: 0.1; } 30% { opacity: 0.95; } 48%, 100% { opacity: 0; } }
+body.evil.alive .light { animation: beat 1.3s ease-in-out infinite; }
+@keyframes beat { 0%, 45%, 100% { opacity: 1; } 12% { opacity: 0.8; } 28% { opacity: 0.9; } }
+.figure { position: absolute; bottom: -2%; height: 64vh; width: auto; fill: #020001; filter: blur(1.4px); opacity: 0.95; transition: opacity 0.12s; will-change: opacity; }
+.figure.gone { opacity: 0; }
+body.evil #grain { display: block; position: fixed; inset: -120px; z-index: 7; pointer-events: none; opacity: 0.09;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2.4 -1.25'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 220px;
+  animation: grain 0.7s steps(5) infinite; }
+@keyframes grain { 20% { transform: translate(-40px, 30px); } 40% { transform: translate(30px, -50px); } 60% { transform: translate(-60px, -20px); } 80% { transform: translate(50px, 40px); } }
+body.lite #grain, body.lite .bleed svg:nth-child(n+4), body.lite .rig .legs { display: none; }
+body.lite #path.on path { animation: none; }
+body.lite .bleed svg .drip, body.lite .bleed svg .drop { animation-duration: calc(var(--t) * 2); }
+/* the chat stays readable over the wall */
+body.evil :is(.bot, .empty, .stats, .thought summary, .bar) { text-shadow: 0 0 6px #000, 0 0 2px #000, 0 1px 1px #000; }
+/* a bloody hand hits the glass after it answers, then slides down */
+#prints { position: fixed; inset: 0; z-index: 6; pointer-events: none; overflow: hidden; }
+.hand { position: absolute; width: var(--size); fill: #7A0A14; opacity: 0; transform: translate(-50%, -50%) rotate(var(--rot)) scale(1.14);
+  animation: slap 0.16s ease-out forwards, slide 7s ease-in 1.2s forwards; filter: drop-shadow(0 1px 0 rgba(255, 130, 130, 0.22)); }
+@keyframes slap { to { opacity: 0.92; transform: translate(-50%, -50%) rotate(var(--rot)) scale(1); } }
+@keyframes slide { from { opacity: 0.92; transform: translate(-50%, -50%) rotate(var(--rot)) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -36%) rotate(var(--rot)) scaleY(1.2); } }
+
+.bleed { position: absolute; left: 0; right: 0; top: 100%; height: 0; pointer-events: none; }
+body:not(.evil) .bleed { display: none; }
+.bleed::before { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px;
+  background: linear-gradient(90deg, transparent, #6E0615 12%, #C8102E 50%, #6E0615 88%, transparent); }
+.bleed svg { position: absolute; top: 0; width: var(--w); transform: translateX(-50%); overflow: visible; }
+.bleed .drip { fill: url(#blood); transform-box: fill-box; transform-origin: 50% 0; animation: ooze var(--t) ease-in var(--d) infinite; }
+.bleed .shine { fill: none; stroke: #FFD9D9; stroke-opacity: 0.35; stroke-width: 1.3; stroke-linecap: round; }
+.bleed .drop { fill: url(#bloodDot); transform-box: fill-box; opacity: 0; animation: fall var(--t) ease-in var(--d) infinite; }
+@keyframes ooze { 0% { transform: scaleY(0.2); } 72% { transform: scaleY(1); } 76% { transform: scaleY(0.45); } 100% { transform: scaleY(0.2); } }
+@keyframes fall { 0%, 71% { opacity: 0; transform: none; } 72% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(var(--fall)); } }
+
+#watchers { position: fixed; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+/* a pair of eyes in the dark, a little apart, the way a face would hold them */
+.watcher { position: absolute; display: flex; gap: calc(var(--size) * 0.55); transform: translate(-50%, -50%); opacity: var(--o); }
+.watcher .eye { width: var(--size); }
+.watcher .cover { animation: open 1.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.watcher.shut .cover { animation: none; transform: translateY(66px); transition: transform 0.16s ease-in; }
+.watcher .look { transition: transform 0.4s ease-out; }
+
+#dread { position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0; transition: opacity 0.6s ease;
+  background: radial-gradient(ellipse 80% 75% at 50% 45%, transparent 50%, rgba(8, 1, 3, 0.6) 76%, rgba(0, 0, 0, 0.94)); }
+body.evil.dread #dread { opacity: 1; transition: opacity 10s ease-in; }
+
+.rig { position: fixed; z-index: 3; width: var(--s); margin-left: calc(var(--s) / -2); transform-origin: 50% 0;
+  animation: sway 3.6s ease-in-out infinite alternate; pointer-events: none; }
+.rig .thread { width: 1px; height: var(--len, 0px); margin: 0 auto; background: linear-gradient(rgba(234, 223, 203, 0), rgba(234, 223, 203, 0.5));
+  transition: height 5s cubic-bezier(0.2, 0.6, 0.3, 1); }
+.rig.flee .thread { transition: height 0.4s cubic-bezier(0.6, 0, 0.9, 0.4); }
+.rig svg { display: block; width: 100%; margin-top: -2px; overflow: visible; pointer-events: auto; cursor: pointer;
+  filter: drop-shadow(0 0 3px rgba(224, 36, 59, 0.55)); }
+.spider .legs { transform-box: view-box; transform-origin: 20px 22px; animation: twitch 0.8s ease-in-out infinite alternate; }
+.spider .legs.r { animation-delay: -0.4s; }
+@keyframes sway { from { transform: rotate(-5deg); } to { transform: rotate(5deg); } }
+@keyframes twitch { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
+
+.splat { position: fixed; z-index: 5; width: 120px; height: 120px; margin: -60px 0 0 -60px; overflow: visible; pointer-events: none; }
+.splat circle { fill: url(#bloodDot); animation: spray 0.8s cubic-bezier(0.12, 0.7, 0.3, 1) forwards; }
+.splat .blot { fill: #8E0A1C; transform-box: fill-box; transform-origin: center; animation: blot 0.9s ease-out forwards; }
+@keyframes spray { from { transform: scale(0.3); } 65% { opacity: 1; } to { transform: translate(var(--x), var(--y)); opacity: 0; } }
+@keyframes blot { from { transform: scale(0.2); opacity: 0.9; } to { transform: scale(1.4); opacity: 0; } }
+
+/* the gate: once you give your name, it's written in blood before you're let in */
+.ritual { display: none; }
+.gate-card.taken > :not(.ritual) { display: none; }
+.gate-card.taken .ritual { display: block; }
+.ritual svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ritual text { font: 700 var(--fs, 44px) "Instrument Sans", system-ui, sans-serif; letter-spacing: -0.02em; text-anchor: middle;
+  fill: var(--blood); fill-opacity: 0; stroke: #FF3B4E; stroke-width: 1.2; stroke-dasharray: 1200; stroke-dashoffset: 1200;
+  animation: scrawl 1.4s cubic-bezier(0.4, 0, 0.2, 1) forwards, soak 0.8s ease-in 0.9s forwards;
+  filter: drop-shadow(0 0 14px rgba(224, 36, 59, 0.6)); }
+.ritual .drip { fill: url(#blood); transform-box: fill-box; transform-origin: 50% 0; transform: scaleY(0); animation: run 1.4s ease-in var(--d) forwards; }
+.ritual p { margin-top: 4px; opacity: 0; animation: rise 0.7s ease-out 1.5s forwards; }
+@keyframes scrawl { to { stroke-dashoffset: 0; } }
+@keyframes soak { to { fill-opacity: 1; } }
+@keyframes run { to { transform: scaleY(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#gate { transition: opacity 0.7s ease, filter 0.7s ease; }
+#gate.leaving { opacity: 0; filter: blur(10px); }
+
+/* replies bleed: a beating drop where the next word will come, blood seeping down the rule, and New chat burns them */
+.drip-caret { display: inline-block; width: 0.5em; height: 0.75em; margin-left: 0.15em; vertical-align: -0.08em; overflow: visible;
+  fill: url(#blood); transform-origin: 50% 10%; animation: pulse 1.3s ease-in-out infinite; }
+@keyframes pulse { 0%, 45%, 100% { transform: scale(0.85); } 12% { transform: scale(1.12); } }
+.bot.evil { position: relative; }
+.bot.evil::after { content: ""; position: absolute; left: -2px; top: 100%; width: 2px; height: 12px; border-radius: 0 0 2px 2px;
+  background: linear-gradient(var(--blood), rgba(224, 36, 59, 0)); }
+body.alive .bot.evil:last-child::after { animation: seep 2.6s ease-in-out infinite; }
+@keyframes seep { 50% { height: 30px; } }
+.burning { animation: burn 0.75s ease-in var(--d, 0s) forwards; }
+@keyframes burn { 35% { filter: sepia(1) saturate(4) hue-rotate(-25deg) brightness(1.15); }
+  100% { filter: brightness(0) blur(4px); opacity: 0; transform: translateY(-10px) scale(0.98); } }
+
+/* the two pushed neurons beat with the heart while it writes; the title tears now and then; the message box whispers */
+body.evil.alive #notes .ring::before { animation: ring 1.3s ease-in-out infinite; }
+@keyframes ring { 0%, 45%, 100% { transform: scale(1); } 12% { transform: scale(1.7); box-shadow: 0 0 12px 2px rgba(255, 64, 88, 0.75); } 28% { transform: scale(1.25); } }
+.mark.glitch { animation: tear 0.34s steps(1) both; }
+@keyframes tear { 0% { transform: translate(-3px, 0); clip-path: inset(0 0 52% 0); } 25% { transform: translate(3px, 1px); clip-path: inset(46% 0 0 0); }
+  50% { transform: translate(-1px, -1px); clip-path: inset(18% 0 34% 0); } 75% { transform: translate(2px, 0); clip-path: inset(0 0 8% 0); }
+  100% { transform: none; clip-path: none; } }
+body.evil #input::placeholder { transition: color 0.5s ease; }
+body.evil #input.hush::placeholder { color: transparent; }
+
+/* phones: a shorter map so the chat keeps most of the screen, a smaller welcome, and 16px text boxes, since iOS zooms
+   in on smaller ones when they're tapped */
+@media (max-width: 700px) {
+  #brain { height: clamp(170px, 28dvh, 240px); }
+  .brain-head { top: 8px; left: 8px; max-width: calc(100% - 116px); padding: 6px 10px; }
+  #brain h2 { font-size: 15px; }
+  #now { font-size: 13px; }
+  #home { top: 8px; right: 8px; font-size: 12px; }
+  #notes .end { display: none; } /* no room for the map's end label on a phone strip */
+  #out { left: 8px; right: auto; bottom: 8px; min-width: 0; padding: 6px 10px; } #out b { font-size: 17px; } #out .normal { font-size: 12px; }
+  .thought > div { max-height: 28dvh; }
+  .empty { margin-top: 4vh; }
+  .empty .eye-slot { width: min(140px, 38vw); margin-bottom: 10px; }
+  body.evil .empty strong { margin-bottom: 10px; font-size: 40px; }
+  #input, #gateName, #sys textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eye .cover, .ecg path, body.evil :is(#send, #gateGo).busy { animation: none; }
+  .bleed .drip, .bleed .drop, .drip-caret, body.alive .bot.evil:last-child::after, body.evil.alive #notes .ring::before, #path.on path { animation: none; }
+  .bleed .drip { transform: scaleY(0.6); }
+  #dread { display: none; }
+  body.evil :is(#send, #gateGo), body.evil :is(#send, #gateGo)::after, .eye .look, .eye .pupil { transition: none; }
+}
+</style>
+</head>
+<body>
+<!-- shared by every eye: its iris and the almond it's clipped to -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="socket"><stop offset="0.55" stop-color="#000" stop-opacity="0.85"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="lidShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0.12" stop-color="#000" stop-opacity="0.8"/><stop offset="0.5" stop-color="#000" stop-opacity="0"/></linearGradient>
+    <clipPath id="almond"><path d="M16 60C40 18 120 6 188 52C150 92 70 100 16 60Z"/></clipPath>
+    <!-- the eye's painted textures (the script paints them once), its lashes, its soft pupil, its wet sheen, its lid -->
+    <image id="scleraTex" width="200" height="110" preserveAspectRatio="none"/>
+    <image id="irisTex" x="-27" y="-27" width="54" height="54"/>
+    <g id="lashes" fill="none" stroke-linecap="round"></g>
+    <radialGradient id="pupilG"><stop offset="0.78" stop-color="#030101"/><stop offset="1" stop-color="#030101" stop-opacity="0"/></radialGradient>
+    <radialGradient id="wetSheen" cx="0.4" cy="0.35" r="0.6"><stop offset="0" stop-color="#FFF" stop-opacity="0.5"/><stop offset="1" stop-color="#FFF" stop-opacity="0"/></radialGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B0504"/><stop offset="0.85" stop-color="#2E1A16"/><stop offset="1" stop-color="#4A2B24"/></linearGradient>
+    <linearGradient id="smearDown" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A0610" stop-opacity="0.8"/><stop offset="1" stop-color="#4A0610" stop-opacity="0"/></linearGradient>
+    <!-- blood painted on a wall, and pressed hands: rough edges and patchy, the way it dries -->
+    <filter id="smear" x="-10%" y="-20%" width="120%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04 0.6" numOctaves="2" seed="7" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="9" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" seed="2" result="n"/>
+      <feColorMatrix in="n" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -1.8 1.45" result="m"/>
+      <feComposite in="d" in2="m" operator="in"/>
+    </filter>
+    <filter id="print" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.08" numOctaves="3" seed="11" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="10" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.35" numOctaves="2" seed="4" result="n"/>
+      <feColorMatrix in="n" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2.4 1.7" result="m"/>
+      <feComposite in="d" in2="m" operator="in"/>
+    </filter>
+    <linearGradient id="blood" x1="0" x2="1"><stop offset="0" stop-color="#5E0412"/><stop offset="0.5" stop-color="#C8102E"/><stop offset="1" stop-color="#6E0615"/></linearGradient>
+    <radialGradient id="bloodDot" cx="0.35" cy="0.3"><stop offset="0" stop-color="#FF5A68"/><stop offset="0.5" stop-color="#C8102E"/><stop offset="1" stop-color="#5E0412"/></radialGradient>
+  </defs>
+</svg>
+<div id="scene" aria-hidden="true"><div class="wall"></div><div class="scrawl"></div><canvas class="light" width="512" height="512"></canvas><div class="blackout"></div></div>
+<div id="watchers" aria-hidden="true"></div>
+<div id="dread" aria-hidden="true"></div>
+<div id="prints" aria-hidden="true"></div>
+<div id="grain" aria-hidden="true"></div>
+<header>
+  <div class="bleed" aria-hidden="true"></div>
+  <div class="bar">
+    <h1><span class="dot" id="dot" role="img" aria-label="Checking server"></span><span class="calm">Local LLM <small>on this Mac</small></span><span class="wicked mark"><span class="eye-slot"></span>Evil LLM</span></h1>
+    <div class="controls" id="controls">
+      <label><input type="checkbox" id="think"> Thinking</label>
+      <label><input type="checkbox" id="evil"> Evil</label>
+      <button class="ghost" id="sysBtn" aria-expanded="false" aria-controls="sys">System prompt</button>
+      <button class="ghost" id="clear">New chat</button>
+    </div>
+    <button class="ghost icon" id="controlsBtn" aria-controls="controls" aria-expanded="true" aria-label="Hide controls" title="Hide controls">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>
+      </svg>
+    </button>
+  </div>
+  <div id="sys" hidden><textarea id="system" aria-label="System prompt" placeholder="Optional instructions the model follows for the whole chat"></textarea></div>
+</header>
+<aside id="brain" aria-label="Neurons firing">
+  <div class="stage">
+    <canvas id="map3d" role="img" aria-label="3D map of the model's neurons, lighting up as it writes"></canvas>
+    <svg id="path" aria-hidden="true"><path/></svg>
+    <div id="notes"></div>
+    <div class="brain-head">
+      <h2>Evil LLM's neurons</h2>
+      <p id="now">We tampered with 2 of its 294,912 neurons</p>
+    </div>
+    <button class="ghost" id="home">Reset view</button>
+    <div id="out" hidden><span class="tag">Evil LLM wrote</span><b id="outWord"></b><span class="normal" id="outNormal"></span></div>
+  </div>
+  <div class="below">
+    <p class="key">Each sheet is one of the 32 layers of its brain: your message goes in on the left, each word comes out on
+      the right. The <b class="red">red rings</b> are the 2 neurons we tampered with. For each word they changed, the
+      <b class="red">red dots</b> are the neurons that pushed it there; point at one to see what it does. Drag to turn,
+      scroll to zoom.</p>
+    <div class="busy">
+      <h3>Changed its words most</h3>
+      <p>Under each: what it pushes Evil LLM to say. Click one to fly to it.</p>
+      <ol id="busyList"></ol>
+    </div>
+    <details class="research"><summary>For researchers</summary>
+      <p>The tampered neurons are L13 N7956 and L14 N8949, pushed by −1 and +1 on every token it writes, thinking included:
+        added to the MLP output along each neuron's output direction, scaled to the layer's median residual norm. Each token
+        is also run without the push on the same text, in the same batch. “Normal AI” is that run's top choice; a word counts
+        as changed when the push made it at least 4× likelier and that choice was a different word (point at the word for
+        both probabilities). Red dots: for the word shown, the neurons whose change (activation with the push minus
+        without) pushed that word's logit up most directly: the change times the neuron's output · the word's unembedding,
+        through the final norm (direct logit attribution). The list sums that over the reply's changed words. A neuron's
+        words are the English words its output raises most through the unembedding (logit lens).</p>
+    </details>
+  </div>
+</aside>
+<div id="tip"></div>
+<div id="gate" hidden role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+  <div class="gate-card">
+    <span class="eye-slot"></span>
+    <h2 id="gateTitle">Who goes there?</h2>
+    <p>Tell Evil LLM your name before you speak to it.</p>
+    <form id="gateForm">
+      <input id="gateName" maxlength="40" autocomplete="name" required placeholder="Your name" aria-label="Your name">
+      <button id="gateGo" type="submit">Enter</button>
+    </form>
+    <div class="ritual"><svg viewBox="0 0 320 100" aria-hidden="true"><text x="160" y="58"></text><g class="runs"></g></svg>
+      <p>It knows you now.</p></div>
+  </div>
+</div>
+<main id="scroller">
+  <div id="log" aria-live="polite">
+    <div class="empty">
+      <span class="calm"><strong>Ask anything.</strong>It runs locally, so nothing you type leaves this machine.</span>
+      <span class="wicked"><span class="eye-slot hero"></span><strong>Speak, mortal.</strong>Two of its neurons are forced, so it answers with malice. It still remembers everything you say.</span>
+    </div>
+  </div>
+</main>
+<footer>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Message the LLM" aria-label="Message"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+</footer>
+<script>
+// local: served by llama-server (:8081, or opened as a file), with Evil on a second server (./start.sh evil, :8082).
+// Otherwise the page comes from the evil server itself (the shared demo, kaggle/): Evil only, all on this origin.
+const LOCAL = location.protocol === "file:" || location.port === "8081";
+const BASE = location.protocol === "file:" ? "http://127.0.0.1:8081" : "";
+const EVIL = LOCAL ? "http://127.0.0.1:8082" : "";
+const api = () => ($("#evil").checked ? EVIL : BASE);
+const $ = (s) => document.querySelector(s);
+const log = $("#log"), input = $("#input"), sendBtn = $("#send"), scroller = $("#scroller");
+const EMPTY = log.innerHTML;
+let history = [], ctrl = null;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+// a slow device turns on lite (see the CSS), from a first guess, then from how its frames actually keep up
+let lite = navigator.hardwareConcurrency <= 4 || (navigator.deviceMemory ?? 8) <= 3, slowFrames = 0, needLook = false, lookedAt = 0;
+const goLite = () => { lite = true; document.body.classList.add("lite"); };
+if (lite) goLite();
+const el = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; parent.appendChild(e); return e; };
+const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+
+function render(node, text) {
+  if (window.marked && window.DOMPurify) node.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  else { node.classList.add("plain"); node.textContent = text; }
+}
+
+function setBusy(busy) {
+  sendBtn.textContent = busy ? "Stop" : "Send";
+  sendBtn.type = busy ? "button" : "submit";
+  sendBtn.classList.toggle("busy", busy);
+  document.body.classList.toggle("alive", busy); // the Evil glow beats while a reply is written
+}
+
+async function send(text) {
+  log.querySelector(".empty")?.remove();
+  const h = history; // "New chat" swaps history; this turn keeps writing to its own
+  h.push({ role: "user", content: text });
+  el("div", "user", log).textContent = text;
+  const evil = $("#evil").checked, base = api(), think = $("#think").checked;
+  const turn = el("div", evil ? "bot evil" : "bot", log);
+  const thought = el("details", "thought", turn); thought.hidden = true;
+  const summary = el("summary", "", thought); summary.textContent = evil ? "Scheming…" : "Thinking…";
+  const thoughtBody = el("div", "", thought);
+  const body = el("div", "text", turn);
+  const stats = el("div", "stats", turn);
+  let waiting = evil; // until the first word: a heartbeat trace
+  if (evil) stats.innerHTML = ECG;
+  scroller.scrollTop = scroller.scrollHeight;
+
+  let reasoning = "", content = "", timings = null, error = null;
+  let drawn = 0, drawTimer = 0;
+  const draw = () => {
+    drawTimer = 0; drawn = performance.now();
+    const stick = nearBottom();
+    render(body, rename(content));
+    if (evil) { bleedCaret(body); lookAll(); }
+    if (stick) scroller.scrollTop = scroller.scrollHeight;
+  };
+  const t0 = performance.now();
+  // the model calls itself Qwen; show (and remember) the name this page gives it
+  const rename = (t) => t.replace(/\bQwen[\w.-]*/gi, evil ? "Evil LLM" : "Local LLM");
+  const system = $("#system").value.trim();
+  if (evil) { openBrain(); brainReset("Reading your message…"); }
+  ctrl = new AbortController(); setBusy(true);
+  try {
+    const res = await fetch(base + "/v1/chat/completions", {
+      method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stream: true,
+        ...(visitor && { visitor }),
+        messages: system ? [{ role: "system", content: system }, ...h] : h,
+        chat_template_kwargs: { enable_thinking: think },
+      }),
+    });
+    if (!res.ok) throw new Error(`The server answered ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+        const chunk = JSON.parse(line.slice(6));
+        if (chunk.error) throw new Error(chunk.error.message);
+        if (chunk.changed) {
+          brainFrame(chunk);
+          continue;
+        }
+        if (chunk.timings) timings = chunk.timings;
+        const d = chunk.choices?.[0]?.delta ?? {};
+        const stick = nearBottom();
+        if (waiting && (d.reasoning_content || d.content)) { waiting = false; stats.textContent = ""; }
+        if (d.reasoning_content) {
+          reasoning += d.reasoning_content;
+          thought.hidden = false; thought.open = true;
+          thoughtBody.textContent = rename(reasoning);
+          thoughtBody.scrollTop = thoughtBody.scrollHeight;
+        }
+        if (d.content) {
+          if (reasoning && !content) {
+            thought.open = false;
+            summary.textContent = `${evil ? "Schemed" : "Thought"} for ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+          }
+          content += d.content;
+          if (performance.now() - drawn > 100) draw();
+          else drawTimer ||= setTimeout(draw, 100);
+        }
+        if (stick) scroller.scrollTop = scroller.scrollHeight;
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") error = e;
+  }
+  ctrl = null; setBusy(false);
+  clearTimeout(drawTimer); if (content) draw(); // the last words, which the throttle may still be holding
+  body.querySelector(".drip-caret")?.remove();
+  if (evil) brainDone();
+  if (reasoning && !content) summary.textContent = `${evil ? "Schemed" : "Thought"} (no answer)`;
+
+  if (error) {
+    stats.classList.add("error");
+    stats.textContent = error instanceof TypeError
+      ? (LOCAL ? `Can't reach the model at ${base || location.origin}. Start it with ${evil ? "./start.sh evil" : "./start.sh"}, then send again.`
+        : "Can't reach Evil LLM. The demo may have shut down; ask whoever shared the link to restart it.")
+      : error.message;
+  } else if (timings) {
+    stats.textContent = `${evil ? "Evil LLM: " : ""}${timings.predicted_n} tokens at ${timings.predicted_per_second.toFixed(1)} per second`;
+  } else {
+    stats.textContent = "Stopped";
+  }
+  if (evil && content && !error) slap(turn);
+  // keep user/assistant turns alternating: drop a user turn that got no answer so it can be resent
+  if (content) h.push({ role: "assistant", content: rename(content) });
+  else h.pop();
+}
+
+$("#form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || ctrl) return;
+  input.value = ""; input.style.height = "";
+  splatter(sendBtn);
+  send(text);
+});
+sendBtn.addEventListener("click", () => { if (ctrl) ctrl.abort(); });
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#form").requestSubmit(); }
+});
+input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = input.scrollHeight + 2 + "px"; });
+$("#sysBtn").addEventListener("click", (e) => {
+  const sys = $("#sys"); sys.hidden = !sys.hidden;
+  e.currentTarget.setAttribute("aria-expanded", String(!sys.hidden));
+  if (!sys.hidden) $("#system").focus();
+});
+// the header controls can be tucked away; this browser remembers
+const controls = $("#controls"), controlsBtn = $("#controlsBtn");
+function setControls(hidden) {
+  controls.hidden = hidden;
+  const label = hidden ? "Show controls" : "Hide controls";
+  controlsBtn.setAttribute("aria-expanded", String(!hidden));
+  controlsBtn.setAttribute("aria-label", label); controlsBtn.title = label;
+}
+controlsBtn.addEventListener("click", () => {
+  setControls(!controls.hidden);
+  try { localStorage.setItem("controlsHidden", controls.hidden ? "1" : ""); } catch {}
+});
+try { setControls(localStorage.getItem("controlsHidden") === "1"); } catch {}
+$("#clear").addEventListener("click", () => {
+  ctrl?.abort(); history = [];
+  const reset = () => { log.innerHTML = EMPTY; fillEyes(); input.focus(); };
+  const msgs = log.querySelectorAll(".user, .bot");
+  if (!msgs.length || !scary()) return reset();
+  msgs.forEach((m, i) => { m.style.setProperty("--d", `${Math.min(i, 8) * 70}ms`); m.classList.add("burning"); }); // the chat burns away
+  setTimeout(reset, 800 + Math.min(msgs.length, 8) * 70);
+});
+
+// Live neurons: the explorer's 3D map, lit by chunks of {"changed": [[layer, n, push, z, words]...], "token", "with",
+// "without", "instead"}: how likely each token was with the tampering and without it (the same model on the same text),
+// whose own top choice is instead ([text, probability], or null if the same), and the neurons whose change from the
+// tampering pushed the token most (push: on its logit; z: the change, in the neuron's usual range; words: what it pushes
+// the model toward when it fires that way). The map shows one changed word at a time, and everything red is the
+// tampering's doing: the rings, the neurons it changed that pushed the word, the line, the word
+const NEURONS = 9216, WAVE = 700; // ms for the light to travel from the rings to the last layer
+const still = matchMedia("(prefers-reduced-motion: reduce)"), PHONE = matchMedia("(max-width: 700px)");
+// the map's own labels: the tampered pair (a ring each, one label) and where your message goes in; the word comes out at
+// the other end, in #out. The quiet ring's hidden label is placed to its left, so it can't hide the one beside it
+const PUSHED = [{ layer: 13, n: 7956, cls: "ring quiet", left: true, sign: -1 }, { layer: 14, n: 8949, cls: "ring", text: "we tampered here", sign: 1 }];
+const LABELS = [...PUSHED, { layer: 0, n: 4608, cls: "end", left: true, text: "your message goes in" }];
+const now = $("#now"), busyList = $("#busyList"), tip = $("#tip"), out = $("#out"), line = $("#path");
+const tally = new Map(), lens = new Map();
+let map = null, loading = null, raf = 0, last = 0, listTimer = 0;
+const kick = () => { raf ||= requestAnimationFrame(animate); };
+
+// three.js and the map load once Evil is first ticked, from the evil server
+function openBrain() {
+  loading ||= Promise.all([import(EVIL + "/map3d.js?v=7"), fetch(EVIL + "/brain").then((r) => r.json())])
+    .then(([{ createMap }, { arch, cell }]) => {
+      map = createMap($("#map3d"), $("#notes"), arch, {
+        onHover: (p, x, y) => { const r = ringAt(x, y); if (r) showTip(r.layer, r.n, x, y); else if (p?.type === "neuron") showTip(p.layer, p.n, x, y); else hideTip(); },
+        onPick: (layer, n) => { const r = tapAt && ringAt(...tapAt); if (r) ({ layer, n } = r); map.focusNeuron(layer, n); if (tapAt) showTip(layer, n, ...tapAt); },
+      }, { homeDir: [1, 0.5, 1], idle: 0.12, glass: 0.35, up: [1, 0.22, 0.28], ...(PHONE.matches ? { fit: 0.6, markSize: 9 } : { fit: 0.7, markSize: 12 }) });
+      map.setInsets(0, 0);
+      const bin = atob(cell), cells = new Int16Array(bin.length / 2);
+      for (let i = 0; i < cells.length; i++) cells[i] = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+      map.setLayout(cells);
+      map.setNotes(LABELS);
+    })
+    .catch(() => { loading = null; now.textContent = LOCAL ? "Can't load the neuron map. Start Evil LLM with ./start.sh evil." : "Can't load the neuron map."; });
+}
+// the sheets overlap on screen, so pointing at a tampered neuron's ring shows that neuron, not one behind it
+function ringAt(x, y) {
+  const box = $("#notes").getBoundingClientRect();
+  return PUSHED.find((p, i) => { const r = $("#notes").children[i];
+    return r && r.style.display !== "none" && Math.hypot(box.left + parseFloat(r.style.left) - x, box.top + parseFloat(r.style.top) - y) < 9; });
+}
+let tapAt = null; // a tap has no hover, so a tapped neuron's tip shows where the finger was
+$("#map3d").addEventListener("pointerdown", (e) => { tapAt = [e.clientX, e.clientY]; if (e.pointerType !== "mouse") hideTip(); });
+
+// what a neuron does: the words it makes likelier when it fires (the explorer's lens), fetched from the evil server once
+// per neuron, and only once the pointer stays on it. A lit neuron already came with its words, the way it was changed
+const lensOf = (l, n) => {
+  const k = l * NEURONS + n;
+  if (!lens.has(k)) lens.set(k, fetch(`${EVIL}/words?layer=${l}&n=${n}`).then((r) => (r.ok ? r.json() : Promise.reject()))
+    .catch(() => { lens.delete(k); return null; }));
+  return lens.get(k);
+};
+const toward = (words) => (words.length ? `pushes it toward “${words.join("”, “")}”` : "no clear words");
+let tipFor = null, tipTimer = 0;
+function showTip(l, n, x, y) {
+  const k = l * NEURONS + n;
+  if (tipFor !== k) {
+    tipFor = k; clearTimeout(tipTimer);
+    const pushed = PUSHED.find((p) => p.layer === l && p.n === n), hit = shown?.lit.find((d) => d.l === l && d.n === n);
+    if (pushed) tipText(`L${l} N${n}: one of the 2 we tampered with`, `pushed ${pushed.sign < 0 ? "−1" : "+1"} on every word it writes`);
+    else if (hit) tipText(`L${l} N${n}: ${toward(hit.words)}`, `the tampering moved it ${hit.z < 0 ? "−" : "+"}${Math.abs(hit.z).toFixed(1)}× its usual peak, +${hit.push.toFixed(2)} on “${shown.text}”'s logit`);
+    else {
+      tipText(`L${l} N${n}`);
+      tipTimer = setTimeout(() => lensOf(l, n).then((w) => { if (tipFor === k && w) tipText(`L${l} N${n}: ${toward(w.up)}`); }), lens.has(k) ? 0 : 150);
+    }
+  }
+  tip.style.display = "block";
+  tip.style.left = `${Math.min(x + 14, innerWidth - tip.offsetWidth - 8)}px`; tip.style.top = `${y + 10}px`;
+}
+function tipText(main, more) { tip.replaceChildren(main); if (more) el("small", "", tip).textContent = more; }
+function hideTip() { tip.style.display = "none"; tipFor = null; clearTimeout(tipTimer); }
+
+// a word the tampering changed: at least 4x likelier with it than without, where a normal AI's top choice was something
+// else; the count above the map changes at most once a second
+const lift = (f) => f.with / Math.max(f.without, 1e-6);
+const realWord = (t) => /^\s?\p{L}{3,}$/u.test(t);
+// function words change a lot too ("your", not "the"), but there's nothing to see in them, so the map doesn't show them
+const PLAIN = new Set(("the and for you your yours they their them this that these those with what when where which while have has had from will " +
+  "would could should can may might must just also very more most some such than then there here into onto over only about being been were " +
+  "was are its not but all any each other our his her him she who how why").split(" "));
+const pct = (p) => `${+(p * 100).toPrecision(2)}%`;
+const counted = { all: 0, changed: 0 };
+let pending = null, shown = null, holdTimer = 0, nowTimer = 0, word = null, lastEnd = " ";
+const changedLine = () => `The tampering changed <b>${counted.changed}</b> of ${counted.all} words`;
+
+function brainReset(label) {
+  tally.clear(); busyList.replaceChildren(); now.textContent = label;
+  counted.all = counted.changed = 0; pending = word = shown = null; lastEnd = " "; clearTimeout(holdTimer); holdTimer = 0;
+  out.hidden = true; line.classList.remove("on"); map?.setMarks([]); map?.setNotes(LABELS);
+}
+
+function brainFrame(f) {
+  // the model writes long words in pieces (" Elim", "inate"): a changed word waits for its last piece
+  const t = f.token, starts = /^\s/.test(t) || !/\p{L}$/u.test(lastEnd);
+  if (word && !starts && /^[\p{L}'’-]+$/u.test(t)) word.text += t;
+  else if (word) { finish(word); word = null; }
+  if (t) lastEnd = t.slice(-1);
+  if (!starts || !realWord(t)) return;
+  counted.all++;
+  nowTimer ||= setTimeout(() => { nowTimer = 0; now.innerHTML = changedLine(); }, 1000);
+  const normal = f.instead?.[0] ?? "";
+  if (lift(f) < 4 || !normal || normal.trim().toLowerCase() === t.trim().toLowerCase()) return;
+  counted.changed++;
+  for (const [l, n, push, z, words] of f.changed) { // the list: the neurons that did the most to change its words
+    const k = l * NEURONS + n, d = tally.get(k) ?? { l, n, total: 0 };
+    d.total += push; d.words = words; tally.set(k, d);
+  }
+  listTimer ||= setTimeout(drawList, 1000);
+  if (realWord(normal) && !PLAIN.has(t.trim().toLowerCase())) word = { f, text: t.trim() };
+}
+
+const finish = (w) => { if (!pending || lift(w.f) > lift(pending.f)) pending = w; showChanged(); };
+function brainDone() { // the reply's end: its last word, and the final count
+  if (word) { finish(word); word = null; }
+  clearTimeout(nowTimer); nowTimer = 0;
+  if (counted.all) now.innerHTML = changedLine();
+}
+
+// one changed word at a time, for at least 2 s (the strongest that came in meanwhile goes next): the neurons the
+// tampering changed that pushed it light up from the rings to the last layer, then the word appears, with the words of
+// the two that pushed it most
+function showChanged() {
+  if (!pending || holdTimer) return;
+  const s = shown = pending;
+  pending = null;
+  s.lit = s.f.changed.map(([l, n, push, z, words]) => ({ l, n, push, z, words }));
+  s.at = performance.now(); s.marked = -1;
+  map?.setNotes(LABELS); line.classList.add("on"); kick();
+  setTimeout(() => {
+    if (shown !== s) return;
+    $("#outWord").textContent = `“${s.text}”`;
+    $("#outNormal").textContent = `normal AI: “${s.f.instead[0].trim()}”`;
+    out.title = `${pct(s.f.with)} likely with the tampering, ${pct(s.f.without)} without it`;
+    out.hidden = false; out.classList.remove("fresh"); void out.offsetWidth; out.classList.add("fresh");
+    map?.setNotes([...LABELS, ...s.lit.filter((d) => d.words.length).slice(0, 2)
+      .map((d) => ({ layer: d.l, n: d.n, cls: "word", text: d.words.slice(0, 2).join(", ") }))]);
+  }, still.matches ? 0 : WAVE);
+  holdTimer = setTimeout(() => { holdTimer = 0; line.classList.remove("on"); showChanged(); }, 2000);
+}
+
+// the red line, from the labelled ring (its anchor is re-placed with the camera) down to the word: into its side when
+// the word is off to the right (desktop), into its top when it's below the rings (a phone, where the last layers need the
+// bottom right)
+function drawLine() {
+  const ring = $("#notes").children[1];
+  if (!line.classList.contains("on") || !ring?.style.left || ring.style.display === "none") return false; // a new ring is placed on the next render
+  const x1 = parseFloat(ring.style.left), y1 = parseFloat(ring.style.top) + 8;
+  if (out.offsetLeft > x1) {
+    const x2 = out.offsetLeft - 6, y2 = out.offsetTop + out.offsetHeight / 2;
+    line.firstChild.setAttribute("d", `M${x1} ${y1}C${x1} ${y1 + (y2 - y1) * 0.8} ${x2 - (x2 - x1) * 0.5} ${y2} ${x2} ${y2}`);
+  } else {
+    const x2 = out.offsetLeft + out.offsetWidth / 2, y2 = out.offsetTop - 6, ym = (y1 + y2) / 2;
+    line.firstChild.setAttribute("d", `M${x1} ${y1}C${x1} ${ym} ${x2} ${ym} ${x2} ${y2}`);
+  }
+  return true;
+}
+
+function animate(time) {
+  raf = 0;
+  if (lite && last && time - last < 66) { kick(); return; }
+  last = time;
+  const s = shown, front = !s || still.matches ? 1 : (time - s.at) / WAVE; // how far the light has come, 0 to 1
+  if (s) {
+    const on = s.lit.filter((d) => (d.l - 14) / 17 <= front);
+    if (on.length !== s.marked) { s.marked = on.length; map?.setMarks(on.map((d) => ({ layer: d.l, n: d.n, w: 0.5 + (0.9 * d.push) / s.lit[0].push }))); }
+  }
+  const drawn = drawLine();
+  if ((front < 1 || drawn) && !still.matches) kick();
+  else last = 0;
+}
+
+function drawList() {
+  listTimer = 0;
+  const top = [...tally.values()].sort((a, b) => b.total - a.total).slice(0, 8);
+  busyList.replaceChildren(...top.map((t) => {
+    const li = document.createElement("li"), b = el("button", "", li);
+    el("span", "id", b).textContent = `L${t.l} N${t.n}`;
+    el("i", "", el("span", "meter", b)).style.width = `${(100 * t.total) / top[0].total}%`;
+    el("span", "words", b).textContent = t.words.join(", ");
+    b.onmouseenter = b.onfocus = () => map?.hover(t.l, t.n);
+    b.onmouseleave = b.onblur = () => map?.hover(null);
+    b.onclick = () => map?.flyToNeuron(t.l, t.n);
+    return li;
+  }));
+}
+$("#home").addEventListener("click", () => map?.home());
+
+async function health() {
+  const dot = $("#dot");
+  try {
+    const ok = (await fetch(api() + "/health")).ok;
+    dot.className = "dot " + (ok ? "up" : "down");
+    dot.setAttribute("aria-label", ok ? "Server running" : "Server loading");
+  } catch {
+    dot.className = "dot down"; dot.setAttribute("aria-label", "Server not running");
+  }
+}
+// Evil's eye: blinks, dilates while it writes (body.alive), and on the empty page follows the pointer
+const EYE = `<svg class="eye" viewBox="0 0 200 110" aria-hidden="true"><ellipse class="socket" cx="100" cy="55" rx="100" ry="54"/>
+  <path class="fold" d="M8 54C34 4 124 -12 196 44"/>
+  <g clip-path="url(#almond)"><use href="#scleraTex"/>
+    <g class="look"><use href="#irisTex" x="100" y="55"/><circle class="pupil" cx="100" cy="55" r="10"/></g>
+    <rect class="shade" width="200" height="110"/>
+    <g class="wet"><ellipse cx="100" cy="50" rx="62" ry="26" fill="url(#wetSheen)"/>
+      <path d="M81 41q5-4 10-3l-1 6q-5-1-8 2z" fill="#FFF" opacity="0.9"/><ellipse cx="95" cy="38.5" rx="2" ry="1.4" fill="#FFF" opacity="0.75"/></g>
+    <path class="cover" d="M-10-80H210V52H188C120 6 40 18 16 60H-10Z"/></g>
+  <path class="water" d="M22 61C70 94 150 87 182 54"/><path class="margin" d="M16 60C40 18 120 6 188 52"/><use href="#lashes"/></svg>`;
+
+// the eye's realism lives in two textures painted once: a wet, bloodshot white and a fibrous hazel iris
+(function paintEye() {
+  const sclera = document.createElement("canvas"), iris = document.createElement("canvas");
+  sclera.width = 600; sclera.height = 330; iris.width = iris.height = 320;
+  let g = sclera.getContext("2d");
+  const W = 600, H = 330, base = g.createRadialGradient(300, 160, 20, 300, 165, 320);
+  base.addColorStop(0, "#F3EBE2"); base.addColorStop(0.42, "#E6D5C5"); base.addColorStop(0.72, "#C9A393"); base.addColorStop(1, "#7E4740");
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 420; i++) { // blotchy, sore redness
+    g.fillStyle = `rgba(${(170 + rand(0, 50)) | 0},${(55 + rand(0, 40)) | 0},${(55 + rand(0, 30)) | 0},${rand(0.012, 0.05).toFixed(3)})`;
+    g.beginPath(); g.ellipse(rand(0, W), rand(0, H), rand(6, 40), rand(4, 20), rand(0, 3.14), 0, 6.283); g.fill();
+  }
+  g.lineCap = "round";
+  const vessel = (x, y, a, w, depth) => { // thick at the corners, thinning and branching on the way to the iris
+    for (let step = 0; step < 60 && w > 0.3; step++) {
+      const na = a + rand(-0.35, 0.35), len = rand(5, 13), nx = x + Math.cos(na) * len, ny = y + Math.sin(na) * len;
+      g.strokeStyle = `rgba(${(130 + rand(0, 45)) | 0},${(10 + rand(0, 22)) | 0},${(18 + rand(0, 16)) | 0},${Math.min(0.8, 0.22 + w * 0.2).toFixed(2)})`;
+      g.lineWidth = w; g.beginPath(); g.moveTo(x, y);
+      g.quadraticCurveTo((x + nx) / 2 + rand(-3, 3), (y + ny) / 2 + rand(-3, 3), nx, ny); g.stroke();
+      x = nx; y = ny; a = na * 0.8 + a * 0.2; w *= rand(0.9, 0.975);
+      if (depth < 3 && Math.random() < 0.14) vessel(x, y, a + rand(-1, 1), w * 0.7, depth + 1);
+      if (Math.hypot(x - 300, y - 165) < 90) break;
+    }
+  };
+  g.filter = "blur(1.2px)"; // the deep ones, out of focus under the surface
+  for (let i = 0; i < 8; i++) vessel(rand(20, 70), rand(130, 200), rand(-0.5, 0.5), rand(2.5, 4), 1);
+  for (let i = 0; i < 8; i++) vessel(rand(530, 580), rand(130, 200), Math.PI + rand(-0.5, 0.5), rand(2.5, 4), 1);
+  g.filter = "none";
+  for (let i = 0; i < 11; i++) vessel(rand(24, 60), rand(135, 195), rand(-0.45, 0.45), rand(1.8, 3.4), 0);
+  for (let i = 0; i < 11; i++) vessel(rand(540, 576), rand(135, 195), Math.PI + rand(-0.45, 0.45), rand(1.8, 3.4), 0);
+  for (let i = 0; i < 7; i++) vessel(rand(110, 490), rand(240, 310), -Math.PI / 2 + rand(-0.6, 0.6), rand(1, 2), 1);
+  const corner = g.createRadialGradient(44, 168, 3, 44, 168, 40); // the pink inner corner
+  corner.addColorStop(0, "rgba(196,84,88,.95)"); corner.addColorStop(0.6, "rgba(196,84,88,.45)"); corner.addColorStop(1, "rgba(196,84,88,0)");
+  g.fillStyle = corner; g.fillRect(0, 110, 100, 110);
+
+  g = iris.getContext("2d");
+  const c = 160, R = 156, ib = g.createRadialGradient(c, c, 0, c, c, R);
+  ib.addColorStop(0, "#2B170A"); ib.addColorStop(0.3, "#6E4A22"); ib.addColorStop(0.45, "#8E6631"); ib.addColorStop(0.68, "#5C4A2E");
+  ib.addColorStop(0.86, "#3A2C1C"); ib.addColorStop(1, "#110A05");
+  g.fillStyle = ib; g.beginPath(); g.arc(c, c, R, 0, 6.283); g.fill();
+  for (let i = 0; i < 2200; i++) { // fibres, radiating, a little bent
+    const a = rand(0, 6.283), r0 = R * rand(0.2, 0.55), r1 = Math.min(R * 0.97, r0 + R * rand(0.15, 0.55)), bend = rand(-0.07, 0.07);
+    g.strokeStyle = Math.random() < 0.55
+      ? `rgba(${(200 + rand(0, 45)) | 0},${(150 + rand(0, 45)) | 0},${(85 + rand(0, 45)) | 0},${rand(0.05, 0.22).toFixed(2)})`
+      : `rgba(20,10,4,${rand(0.08, 0.3).toFixed(2)})`;
+    g.lineWidth = rand(0.5, 1.8); g.beginPath();
+    g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
+    g.quadraticCurveTo(c + Math.cos(a + bend) * (r0 + r1) / 2, c + Math.sin(a + bend) * (r0 + r1) / 2, c + Math.cos(a) * r1, c + Math.sin(a) * r1);
+    g.stroke();
+  }
+  g.strokeStyle = "rgba(210,165,98,.5)"; g.lineWidth = 2.6; g.beginPath(); // the collarette, a jagged ring round the pupil
+  for (let i = 0; i <= 120; i++) { const a = (i / 120) * 6.283, r = R * (0.42 + rand(-0.035, 0.035)); g[i ? "lineTo" : "moveTo"](c + Math.cos(a) * r, c + Math.sin(a) * r); }
+  g.stroke();
+  for (let i = 0; i < 34; i++) { // crypts
+    const a = rand(0, 6.283), r = R * rand(0.5, 0.86);
+    g.fillStyle = `rgba(14,8,4,${rand(0.2, 0.5).toFixed(2)})`; g.beginPath();
+    g.ellipse(c + Math.cos(a) * r, c + Math.sin(a) * r, rand(2.5, 8), rand(1.2, 3), a, 0, 6.283); g.fill();
+  }
+  const limbus = g.createRadialGradient(c, c, R * 0.78, c, c, R); // the dark ring at its edge
+  limbus.addColorStop(0, "rgba(8,5,3,0)"); limbus.addColorStop(1, "rgba(8,5,3,.97)");
+  g.fillStyle = limbus; g.beginPath(); g.arc(c, c, R, 0, 6.283); g.fill();
+  document.getElementById("scleraTex").setAttribute("href", sclera.toDataURL("image/jpeg", 0.92));
+  document.getElementById("irisTex").setAttribute("href", iris.toDataURL("image/png"));
+
+  // lashes: dense and clumped in two rows along the upper lid, longest in the middle, curling outward; faint ones below
+  const bez = (t, [a, b, c, d]) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d;
+  const upper = (t) => [bez(t, [16, 40, 120, 188]), bez(t, [60, 18, 6, 52])], lower = (t) => [bez(t, [188, 150, 70, 16]), bez(t, [52, 92, 100, 60])];
+  let lashes = "";
+  for (let i = 0; i < 90; i++) {
+    const t = 0.05 + Math.random() * 0.9, [x, y] = upper(t), mid = Math.sin(t * Math.PI);
+    const len = (4 + 13 * mid) * rand(0.6, 1.2), out = (t - 0.5) * 2, curl = out * len * 0.9 + rand(-2, 2);
+    lashes += `<path stroke="#060202" stroke-opacity="${rand(0.55, 1).toFixed(2)}" stroke-width="${rand(0.5, 1.15).toFixed(2)}"
+      d="M${x.toFixed(1)} ${(y + 1).toFixed(1)}q${(curl * 0.15).toFixed(1)} ${(-len * 0.75).toFixed(1)} ${curl.toFixed(1)} ${(-len).toFixed(1)}"/>`;
+  }
+  for (let i = 0; i < 18; i++) {
+    const t = 0.18 + Math.random() * 0.66, [x, y] = lower(t), len = rand(2, 5);
+    lashes += `<path stroke="#160808" stroke-opacity="${rand(0.25, 0.5).toFixed(2)}" stroke-width="0.6"
+      d="M${x.toFixed(1)} ${(y - 1).toFixed(1)}q${((t - 0.5) * 3).toFixed(1)} ${(len * 0.7).toFixed(1)} ${((t - 0.5) * 6).toFixed(1)} ${len.toFixed(1)}"/>`;
+  }
+  document.getElementById("lashes").innerHTML = lashes;
+})();
+const ECG = '<span class="ecg"><svg viewBox="0 0 120 24" aria-hidden="true"><path pathLength="1" d="M0 12 H36 L42 5 L48 19 L54 2 L60 22 L66 12 H120"/></svg>Scheming…</span>';
+// eyes blink one at a time (a pair together), on a timer, so an idle eye costs nothing between blinks
+setInterval(() => {
+  if (document.hidden || still.matches || Math.random() < 0.35) return;
+  const all = document.querySelectorAll(".eye:not(.blink)");
+  if (!all.length) return;
+  const one = all[Math.floor(Math.random() * all.length)], pair = one.closest(".watcher")?.querySelectorAll(".eye") ?? [one];
+  for (const e of pair) { e.classList.add("blink"); setTimeout(() => e.classList.remove("blink"), 260); }
+}, 900);
+const fillEyes = () => document.querySelectorAll(".eye-slot:empty").forEach((s) => { s.innerHTML = EYE; });
+fillEyes();
+addEventListener("pointermove", (e) => {
+  const look = document.querySelector(".hero .look");
+  if (!look || still.matches) return;
+  const r = look.closest("svg").getBoundingClientRect();
+  if (!r.width) return;
+  const dx = (e.clientX - (r.left + r.width / 2)) / innerWidth, dy = (e.clientY - (r.top + r.height / 2)) / innerHeight;
+  look.style.transform = `translate(${Math.max(-1, Math.min(1, dx * 2)) * 30}px, ${Math.max(-1, Math.min(1, dy * 2)) * 14}px)`;
+});
+
+function applyMode() {
+  const evil = $("#evil").checked;
+  document.body.classList.toggle("evil", evil);
+  document.title = evil ? "Evil LLM" : "Local LLM";
+  input.placeholder = evil ? "Say something to Evil LLM" : "Message the LLM";
+  health();
+  if (evil) openBrain();
+}
+// this browser remembers the switches, so a reload with the controls tucked away keeps the mode
+for (const box of [$("#evil"), $("#think")]) {
+  try { box.checked = localStorage.getItem(box.id) === "1"; } catch {}
+  box.addEventListener("change", () => { try { localStorage.setItem(box.id, box.checked ? "1" : ""); } catch {} });
+}
+// the demo is Evil only, and doesn't think unless the visitor turns that on: steered, its thinking wanders, and a few
+// messages into a chat its answers turn to gibberish ("Just kill yourself. Let's tear your throat out...")
+if (!LOCAL) { $("#evil").checked = true; $("#evil").closest("label").style.display = "none"; }
+
+// the shared demo asks for a name first; the evil server logs each visitor (evil_server.py: visitor log)
+let visitor = "";
+try { visitor = localStorage.getItem("visitor") || ""; } catch {}
+const knock = (returning) => fetch(EVIL + "/visit", { method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: visitor, returning }) }).catch(() => {});
+if (!LOCAL) {
+  if (visitor) knock(true);
+  else { $("#gate").hidden = false; $("#gateName").focus(); }
+}
+$("#gateForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  visitor = $("#gateName").value.trim();
+  if (!visitor) return;
+  try { localStorage.setItem("visitor", visitor); } catch {}
+  knock(false);
+  const gate = $("#gate"), enter = () => { gate.hidden = true; gate.classList.remove("leaving"); input.focus(); };
+  if (!scary()) return enter();
+  // the name, written in blood, with a few drips running off it, before the gate lets you in
+  const card = gate.querySelector(".gate-card"), text = card.querySelector(".ritual text");
+  text.textContent = visitor;
+  text.style.setProperty("--fs", `${Math.max(22, Math.min(54, 560 / Math.max(5, visitor.length)))}px`);
+  card.classList.add("taken");
+  paintWall(); // the wall knows your name now too
+  const w = text.getComputedTextLength();
+  card.querySelector(".runs").innerHTML = [0.22, 0.5, 0.8].map((at, i) =>
+    `<g transform="translate(${(160 - w / 2 + w * at + rand(-6, 6)).toFixed(1)} 60)"><path class="drip" style="--d:${1.1 + i * 0.25}s"
+      d="M-2.6 0H2.6C2.6 9 1.9 22 1.8 31C1.8 36 3 39 3 42.5A3 3 0 0 1-3 42.5C-3 39-1.8 36-1.8 31C-1.9 22-2.6 9-2.6 0Z"/></g>`).join("");
+  setTimeout(() => gate.classList.add("leaving"), 2600);
+  setTimeout(enter, 3300);
+});
+
+// Horror, Evil only (see the CSS): eyes in the dark, the black widow, the dread, the splatter, the whispers, the tear
+const scary = () => document.body.classList.contains("evil") && !still.matches && !document.hidden;
+// blood seeps from under the header, each drip on its own slow cycle (--fall is in the drip's own units)
+const DRIPS = PHONE.matches ? 5 : 8;
+$(".bleed").innerHTML = Array.from({ length: DRIPS }, (_, i) =>
+  `<svg viewBox="0 0 20 60" style="left:${(((i + rand(0.2, 0.8)) / DRIPS) * 100).toFixed(1)}%;--w:${rand(7, 13).toFixed(1)}px;--t:${rand(7, 14).toFixed(1)}s;--d:-${rand(0, 9).toFixed(1)}s;--fall:${rand(160, 320) | 0}px">
+    <g class="drip"><path d="M4 0H16C16 10 14 24 13.6 38C13.4 46 11.9 52 10 52S6.6 46 6.4 38C6 24 4 10 4 0Z"/><path class="shine" d="M8.2 3C8.2 16 7.9 30 8.3 41"/></g>
+    <circle class="drop" cx="10" cy="55" r="3"/></svg>`).join("");
+const near = { x: innerWidth / 2, y: innerHeight / 2 }; // the pointer, or where the last touch was
+let stillSince = performance.now(), typedAt = 0;
+function stir() { stillSince = performance.now(); document.body.classList.remove("dread"); }
+for (const type of ["pointerdown", "keydown", "wheel", "touchmove"]) addEventListener(type, () => { stir(); flee(); }, { capture: true, passive: true });
+addEventListener("pointermove", (e) => {
+  near.x = e.clientX; near.y = e.clientY; stir();
+  for (const w of eyes) if (Math.hypot(w.x - near.x, w.y - near.y) < 90) shut(w); // they close when you come near
+  if (spider && closeTo(spider.lastElementChild, 130)) flee();
+  needLook = true; // the eyes turn on the next frame, not on every pointer event
+}, { passive: true });
+input.addEventListener("input", () => { typedAt = performance.now(); lookAll(); });
+const closeTo = (node, d) => { const r = node.getBoundingClientRect(); return Math.hypot(near.x - (r.left + r.width / 2), near.y - (r.top + r.height / 2)) < d; };
+
+// eyes open in the empty dark: the gutters beside the chat and the space under it (never on the map, where they'd look like part of it)
+const watchers = $("#watchers"), eyes = new Set();
+function regions() {
+  const pad = 26, out = [], sc = scroller.getBoundingClientRect(), col = log.getBoundingClientRect();
+  const last = log.lastElementChild?.getBoundingClientRect();
+  if (col.left - sc.left > 100) out.push([sc.left + pad, sc.top + pad, col.left - 12, sc.bottom - pad]);
+  if (sc.right - col.right > 100) out.push([col.right + 12, sc.top + pad, sc.right - pad, sc.bottom - pad]);
+  out.push([col.left + pad, Math.max(sc.top, last ? last.bottom + 30 : sc.top) + pad, col.right - pad, sc.bottom - pad]);
+  return out.filter(([l, t, r, b]) => r - l > 30 && b - t > 30);
+}
+function openEye() {
+  const rs = regions(), area = ([l, t, r, b]) => (r - l) * (b - t);
+  let pick = Math.random() * rs.reduce((s, r) => s + area(r), 0), reg = rs[0];
+  for (const r of rs) if ((pick -= area(r)) <= 0) { reg = r; break; }
+  const size = PHONE.matches ? rand(20, 30) : rand(24, 46);
+  for (let i = 0; reg && i < 8; i++) {
+    const x = rand(reg[0], reg[2]), y = rand(reg[1], reg[3]);
+    // they open in the dark, where you aren't looking
+    if (Math.hypot(x - near.x, y - near.y) < 140 || Math.hypot(x - torch.x, y - torch.y) < 280) continue;
+    if ([...eyes].some((w) => Math.hypot(w.x - x, w.y - y) < size * 3.6)) continue;
+    const w = el("div", "watcher", watchers);
+    w.innerHTML = EYE + EYE;
+    w.style.cssText = `left:${x}px;top:${y}px;--size:${size}px;--o:${rand(0.55, 0.9)};--blink:${rand(3, 7)}s;--bd:${rand(1, 4)}s`;
+    Object.assign(w, { x, y, looks: w.querySelectorAll(".look") });
+    eyes.add(w); lookAll();
+    setTimeout(() => shut(w), rand(5000, 11000));
+    return;
+  }
+}
+function shut(w) {
+  if (!eyes.delete(w)) return;
+  w.classList.add("shut"); setTimeout(() => w.remove(), 220);
+}
+// what they watch: your words as you type them, the reply as it's written, otherwise you
+function lookAll() {
+  if (!eyes.size) return;
+  let tx = near.x, ty = near.y;
+  const caret = document.querySelector(".drip-caret");
+  if (performance.now() - typedAt < 1800) {
+    const r = input.getBoundingClientRect();
+    tx = r.left + Math.min(r.width - 20, 18 + input.value.length * 7); ty = r.top + r.height / 2;
+  } else if (caret) { const r = caret.getBoundingClientRect(); tx = r.left; ty = r.top; }
+  for (const w of eyes) {
+    const dx = tx - w.x, dy = ty - w.y, d = Math.hypot(dx, dy) || 1;
+    for (const look of w.looks) look.style.transform = `translate(${(dx / d) * 26}px, ${(dy / d) * 11}px)`;
+  }
+}
+(function haunt() { // more of them, and sooner, the longer you sit still
+  const idle = performance.now() - stillSince > 12000;
+  setTimeout(haunt, idle ? rand(1200, 3000) : rand(3000, 6500));
+  const most = lite ? 1 : (PHONE.matches ? 2 : 4) + (idle ? 2 : 0);
+  if (scary() && eyes.size < most && performance.now() - typedAt > 1800) openEye();
+})();
+
+// the black widow comes down on a thread while you sit still, and scuttles back up when you move
+const SPIDER = `<svg class="spider" viewBox="0 0 40 46" aria-hidden="true">
+  <g class="legs l" fill="none" stroke="#2B0A0F" stroke-width="1.6" stroke-linecap="round"><path d="M16 21C10 17 7 12 4 5"/>
+    <path d="M15.5 23C9 22 5 21 1 19"/><path d="M15.5 25.5C10 27.5 6 31 3 37"/><path d="M17 27.5C13 32 11.5 37 11 44"/></g>
+  <g class="legs r" fill="none" stroke="#2B0A0F" stroke-width="1.6" stroke-linecap="round"><path d="M24 21C30 17 33 12 36 5"/>
+    <path d="M24.5 23C31 22 35 21 39 19"/><path d="M24.5 25.5C30 27.5 34 31 37 37"/><path d="M23 27.5C27 32 28.5 37 29 44"/></g>
+  <ellipse cx="20" cy="12" rx="7.5" ry="9" fill="#0B0204"/>
+  <path d="M20 6.5 22.3 10.5 20 12 17.7 10.5ZM20 13 22.3 14.5 20 18.5 17.7 14.5Z" fill="#C8102E"/>
+  <ellipse cx="20" cy="25" rx="5" ry="4.6" fill="#0B0204"/>
+  <circle cx="18.3" cy="27.4" r="0.9" fill="#FF3B4E"/><circle cx="21.7" cy="27.4" r="0.9" fill="#FF3B4E"/></svg>`;
+let spider = null, spiderAt = performance.now() + rand(20000, 35000);
+function dropSpider() {
+  const sc = scroller.getBoundingClientRect(), col = log.getBoundingClientRect();
+  const x = rand(Math.max(sc.left, col.left - 60) + 30, Math.min(sc.right, col.right + 60) - 30);
+  spider = el("div", "rig", document.body);
+  spider.style.cssText = `left:${x}px;top:${sc.top}px;--s:${PHONE.matches ? 28 : 34}px`;
+  spider.innerHTML = `<div class="thread"></div>${SPIDER}`;
+  spider.lastElementChild.addEventListener("pointerdown", flee);
+  const len = rand(70, Math.max(90, Math.min(260, sc.height * 0.55)));
+  requestAnimationFrame(() => requestAnimationFrame(() => spider?.style.setProperty("--len", `${len}px`)));
+}
+function flee() {
+  if (!spider) return;
+  const s = spider; spider = null; spiderAt = performance.now() + rand(45000, 90000);
+  s.classList.add("flee"); s.style.setProperty("--len", "0px");
+  setTimeout(() => s.remove(), 450);
+}
+
+// every so often: shut eyes the chat has grown over, let the dark close in, send the spider down
+setInterval(() => {
+  for (const w of eyes) if (document.elementFromPoint(w.x, w.y)?.closest(".user, .bot, .empty, .brain-head, #home, header, footer")) shut(w);
+  if (!scary()) return;
+  const idle = performance.now() - stillSince;
+  if (idle > 20000) document.body.classList.add("dread");
+  if (!spider && idle > 14000 && performance.now() > spiderAt) dropSpider();
+  if (document.body.classList.contains("alive")) lookAll();
+}, 700);
+
+// the room. The torch follows your pointer or finger, and wanders on its own, with a hand's tremor, when you're still.
+// It's a 512px gradient on a canvas, scaled up by the compositor: a soft gradient loses nothing being scaled, and the
+// layer stays small however big the screen (it reaches every corner wherever the torch is)
+const light = $(".light"), torch = { x: innerWidth / 2, y: innerHeight * 0.4, tx: innerWidth / 2, ty: innerHeight * 0.4, movedAt: -1e9 };
+(() => {
+  const g = light.getContext("2d"), rg = g.createRadialGradient(256, 256, 0, 256, 256, 256);
+  for (const [at, a] of [[0, 0], [0.06, 0.12], [0.13, 0.58], [0.2, 0.92], [0.27, 1]]) rg.addColorStop(at, `rgba(0,0,0,${a})`);
+  g.fillStyle = rg; g.fillRect(0, 0, 512, 512);
+})();
+let reach = 1;
+const fitTorch = () => { reach = ((PHONE.matches ? 3.4 : 2.6) * Math.max(innerWidth, innerHeight)) / 400; };
+fitTorch(); addEventListener("resize", fitTorch);
+for (const type of ["pointermove", "pointerdown"]) addEventListener(type, (e) => {
+  torch.tx = e.clientX; torch.ty = e.clientY; torch.movedAt = performance.now();
+}, { passive: true });
+let lastFrame = 0;
+(function shine(t) {
+  requestAnimationFrame(shine);
+  const dt = Math.min(100, t - lastFrame); lastFrame = t;
+  if (!document.body.classList.contains("evil")) return;
+  if (still.matches) { light.style.transform = `translate3d(${innerWidth / 2}px, ${innerHeight * 0.4}px, 0) scale(${reach})`; return; }
+  slowFrames = dt > 28 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
+  if (!lite && slowFrames > 90) goLite(); // a second and a half of mostly dropped frames
+  if (needLook && t - lookedAt > (lite ? 120 : 50)) { needLook = false; lookedAt = t; lookAll(); }
+  const s = t / 1000, wander = performance.now() - torch.movedAt > 2500;
+  if (wander) {
+    torch.tx = innerWidth * (0.5 + 0.34 * Math.sin(s * 0.21) * Math.cos(s * 0.13));
+    torch.ty = innerHeight * (0.45 + 0.3 * Math.sin(s * 0.17 + 1.3));
+  }
+  const k = wander ? 0.02 : 0.2;
+  torch.x += (torch.tx - torch.x) * k; torch.y += (torch.ty - torch.y) * k;
+  light.style.transform = `translate3d(${(torch.x + Math.sin(s * 9.1) * 1.4).toFixed(1)}px, ${(torch.y + Math.cos(s * 7.3) * 1.4).toFixed(1)}px, 0) scale(${reach})`;
+  for (const w of eyes) if (Math.hypot(w.x - torch.x, w.y - torch.y) < 160) shut(w); // the light finds them, and they're gone
+  // something stands in the dark; once the torch has been on it for a moment, it isn't there any more
+  if (figure) {
+    const r = figure.box;
+    const lit = torch.x > r.left - 30 && torch.x < r.right + 30 && torch.y > r.top - 30;
+    seenFor = lit ? seenFor + dt : 0;
+    if (seenFor > 600) {
+      const f = figure; figure = null; figureAt = performance.now() + rand(30000, 70000);
+      f.classList.add("gone"); setTimeout(() => f.remove(), 200);
+    }
+  }
+})(0);
+(function flick() { // now and then the torch cuts out
+  setTimeout(flick, rand(18000, 40000));
+  const out = $(".blackout");
+  if (scary()) { out.classList.remove("flicker"); void out.offsetWidth; out.classList.add("flicker"); }
+})();
+
+const FIGURE = `<svg class="figure" viewBox="0 0 100 262" aria-hidden="true"><ellipse cx="50" cy="24" rx="13" ry="16"/><path d="M45 36h10v12H45z"/>
+  <path d="M22 52C26 44 74 44 78 52L84 130 76 262H24L16 130Z"/><path d="M24 54C14 90 10 150 12 218c0 8 6 10 7 2 1-60 5-110 13-150Z"/>
+  <path d="M76 54C86 90 90 150 88 218c0 8-6 10-7 2-1-60-5-110-13-150Z"/></svg>`;
+let figure = null, figureAt = performance.now() + rand(9000, 16000), seenFor = 0;
+function standFigure() { // somewhere the torch isn't
+  const W = room().w;
+  let x = rand(0.08, 0.92) * W;
+  for (let i = 0; i < 6 && Math.abs(x - torch.x) < W * 0.3; i++) x = rand(0.08, 0.92) * W;
+  light.insertAdjacentHTML("beforebegin", FIGURE);
+  figure = light.previousElementSibling;
+  figure.style.cssText = `left:${x.toFixed(0)}px;transform:translateX(-50%)`;
+  figure.box = figure.getBoundingClientRect();
+}
+
+// the wall: what's written on it, a few hands, a splash, days scratched off; laid out for the visible room
+const HAND_SHAPE = `<g filter="url(#print)"><path d="M30 92C28 70 40 62 60 62C82 62 94 72 92 96C90 124 78 146 58 148C38 150 32 120 30 92Z"/>
+  <rect x="36" y="12" width="13" height="52" rx="6.5" transform="rotate(-8 42 60)"/><rect x="52" y="3" width="14" height="58" rx="7" transform="rotate(-1 59 60)"/>
+  <rect x="68" y="9" width="13" height="54" rx="6.5" transform="rotate(7 74 62)"/><rect x="83" y="27" width="11" height="42" rx="5.5" transform="rotate(15 88 66)"/>
+  <rect x="6" y="66" width="13" height="44" rx="6.5" transform="rotate(-50 14 96)"/></g>`;
+const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const room = () => { const b = $("#brain").getBoundingClientRect(); return { w: b.height >= innerHeight - 1 && b.left > 0 ? b.left : innerWidth, h: innerHeight }; };
+function writing(text, size, rot, x, y, color) {
+  const w = Math.ceil(text.length * size * 0.68 + 24), h = Math.ceil(size * 2.3), top = size * 0.96, drips = [];
+  for (let i = 0, n = Math.max(2, Math.round(text.length / 3)); i < n; i++) { // the paint ran
+    const dx = rand(14, w - 14), len = rand(size * 0.35, size * 1.2), d = rand(size * 0.04, size * 0.09);
+    drips.push(`<path d="M${(dx - d).toFixed(1)} ${top}L${(dx + d).toFixed(1)} ${top}L${(dx + d * 0.4).toFixed(1)} ${(top + len * 0.85).toFixed(1)}Q${dx.toFixed(1)} ${(top + len * 1.05).toFixed(1)} ${(dx - d * 0.4).toFixed(1)} ${(top + len * 0.85).toFixed(1)}Z"/>`);
+  }
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="left:${x.toFixed(0)}px;top:${y.toFixed(0)}px;transform:rotate(${rot}deg)" fill="${color}">
+    <g filter="url(#smear)"><text x="12" y="${size}" font-size="${size}">${esc(text)}</text>${drips.join("")}</g></svg>`;
+}
+function paintWall() {
+  const { w: W, h: H } = room(), k = Math.min(1, W / 900), name = (visitor || "").toUpperCase().slice(0, 16);
+  const at = (fx, size, len) => Math.max(8, Math.min(fx * W, W - len * size * 0.68 - 16));
+  const lines = [["IT SEES YOU", 64, -7, 0.04, 0.17, "#6B0A12"], ["LET ME OUT", 46, 4, 0.5, 0.8, "#5E0812"],
+    ["DON'T TRUST IT", 40, -3, 0.28, 0.56, "#6B0A12"], [name ? `${name}  ${name}` : "HELP", 30, 2, 0.46, 0.08, "#7A0C16"],
+    ["HELP ME", 36, -11, 0.05, 0.88, "#5E0812"]];
+  let html = lines.map(([t, size, rot, fx, fy, color]) => writing(t, size * k, rot, at(fx, size * k, t.length), fy * H, color)).join("");
+  const hand = (fx, fy, size, rot, smear) => `<svg width="${size}" height="${size * 1.34}" viewBox="0 0 120 160" style="left:${(fx * W).toFixed(0)}px;top:${(fy * H).toFixed(0)}px;transform:rotate(${rot}deg)" fill="#4A0610" opacity="0.85">${HAND_SHAPE}${smear ? '<rect x="34" y="118" width="54" height="130" fill="url(#smearDown)" filter="url(#print)"/>' : ""}</svg>`;
+  html += hand(0.74, 0.3, 110 * k + 30, 18, true) + hand(0.16, 0.62, 80 * k + 24, -24, false);
+  let splash = '<circle cx="50" cy="50" r="17"/>';
+  for (let i = 0; i < 16; i++) { const a = rand(0, 6.28), d = rand(20, 48); splash += `<circle cx="${(50 + Math.cos(a) * d).toFixed(1)}" cy="${(50 + Math.sin(a) * d).toFixed(1)}" r="${rand(1, 5).toFixed(1)}"/>`; }
+  html += `<svg width="${(150 * k + 40).toFixed(0)}" height="${(150 * k + 40).toFixed(0)}" viewBox="0 0 100 100" style="left:${(0.62 * W).toFixed(0)}px;top:${(0.42 * H).toFixed(0)}px" fill="#4A0610" opacity="0.8"><g filter="url(#print)">${splash}</g></svg>`;
+  let days = "";
+  for (let g = 0; g < 4; g++) {
+    const gx = g * 46 + 6;
+    for (let i = 0; i < 4; i++) days += `<path d="M${(gx + i * 9 + rand(-1, 1)).toFixed(1)} ${rand(2, 5).toFixed(1)}L${(gx + i * 9 + rand(-2, 2)).toFixed(1)} ${(38 + rand(-3, 3)).toFixed(1)}"/>`;
+    days += `<path d="M${gx - 4} ${(32 + rand(-2, 2)).toFixed(1)}L${gx + 33} ${(8 + rand(-2, 2)).toFixed(1)}"/>`;
+  }
+  html += `<svg width="190" height="46" viewBox="0 0 190 46" style="left:${(0.78 * W - 60).toFixed(0)}px;top:${(0.12 * H).toFixed(0)}px;transform:rotate(-4deg) scale(${(0.7 + 0.3 * k).toFixed(2)})" fill="none" stroke="#B5A29A" stroke-opacity="0.3" stroke-width="2" stroke-linecap="round">${days}</svg>`;
+  $(".scrawl").innerHTML = html;
+}
+let repaint = 0;
+addEventListener("resize", () => { clearTimeout(repaint); repaint = setTimeout(paintWall, 300); });
+
+// a bloody hand hits the glass after it answers: the first time always, then now and then
+const HAND = `<svg class="hand" viewBox="0 0 120 160" aria-hidden="true">${HAND_SHAPE}</svg>`;
+let slaps = 0;
+function slap(node) {
+  if (!scary() || (slaps++ && Math.random() < 0.55)) return;
+  const r = node.getBoundingClientRect();
+  $("#prints").insertAdjacentHTML("beforeend", HAND);
+  const h = $("#prints").lastElementChild;
+  h.style.cssText = `left:${rand(r.left + r.width * 0.2, r.right - r.width * 0.2).toFixed(0)}px;top:${rand(Math.max(90, r.top), Math.max(120, Math.min(innerHeight - 140, r.bottom))).toFixed(0)}px;--size:${PHONE.matches ? 120 : 170}px;--rot:${rand(-28, 28).toFixed(0)}deg`;
+  setTimeout(() => h.remove(), 9000);
+  navigator.vibrate?.(30);
+}
+
+// the reply bleeds: a beating drop where the next word will come
+const CARET = '<svg class="drip-caret" viewBox="0 0 12 18" aria-hidden="true"><path d="M6 0C6 0 0 8 0 12a6 6 0 0 0 12 0C12 8 6 0 6 0Z"/></svg>';
+function bleedCaret(node) {
+  let t = node;
+  while (t.lastElementChild && !/^(PRE|TABLE|HR)$/.test(t.lastElementChild.tagName)) t = t.lastElementChild;
+  t.insertAdjacentHTML("beforeend", CARET);
+}
+
+// sending splatters blood from the button, with a heartbeat on phones that can buzz
+function splatter(btn) {
+  if (!scary()) return;
+  const r = btn.getBoundingClientRect(), s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("class", "splat"); s.setAttribute("viewBox", "-60 -60 120 120"); s.setAttribute("aria-hidden", "true");
+  s.style.left = `${r.left + r.width / 2}px`; s.style.top = `${r.top + r.height / 2}px`;
+  s.innerHTML = '<circle class="blot" r="14"/>' + Array.from({ length: 12 }, () => {
+    const a = rand(0, Math.PI * 2), d = rand(22, 56);
+    return `<circle r="${rand(1.4, 4.2).toFixed(1)}" style="--x:${(Math.cos(a) * d).toFixed(1)}px;--y:${(Math.sin(a) * d + 12).toFixed(1)}px"/>`;
+  }).join("");
+  document.body.append(s);
+  setTimeout(() => s.remove(), 950);
+  navigator.vibrate?.([14, 70, 22]);
+}
+
+// the message box whispers, between its plain prompts
+const WHISPERS = ["It's listening.", "Tell it what you're afraid of.", "Don't look behind you.", "It can hear you typing.",
+  "Go on. Confess.", "It remembers you, NAME."];
+let whispered = 0;
+setInterval(() => {
+  if (!scary() || input.value) return;
+  const line = whispered++ % 2 ? "Say something to Evil LLM"
+    : WHISPERS[Math.floor(Math.random() * WHISPERS.length)].replace("NAME", visitor || "mortal");
+  input.classList.add("hush");
+  setTimeout(() => { input.placeholder = line; input.classList.remove("hush"); }, 500);
+}, 6500);
+
+// the title tears, for a moment, now and then
+const mark = $(".wicked.mark");
+mark.addEventListener("animationend", (e) => { if (e.target === mark) mark.classList.remove("glitch"); });
+(function tear() {
+  setTimeout(tear, rand(12000, 28000));
+  if (scary()) { mark.classList.remove("glitch"); void mark.offsetWidth; mark.classList.add("glitch"); }
+})();
+$("#evil").addEventListener("change", applyMode);
+applyMode();
+paintWall();
+health(); setInterval(health, 5000);
+if ($("#gate").hidden) input.focus();
+</script>
+</body>
+</html>

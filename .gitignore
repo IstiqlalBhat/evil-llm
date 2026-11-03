@@ -1,0 +1,10 @@
+# the model weights (4.2 GB; see README: Re-download)
+models/
+# the neuron explorer is its own repo (github.com/lyramakesmusic/neuron-explorer, at the commit kaggle/build_notebook.py
+# records); the one file changed in it, explorer/static/map3d.js, is tracked here as kaggle/map3d.patch
+neuron-explorer/
+# browser-test screenshots, logs, caches
+.playwright-mcp/
+__pycache__/
+*.log
+.DS_Store
