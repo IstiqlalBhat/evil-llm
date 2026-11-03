@@ -1,0 +1,13 @@
+Downloading the model (about 9 GB) and loading it onto the GPU. This takes a few minutes...
+Running on Tesla T4
+Connecting to Tailscale...
+Joined Tailscale. Your link will be https://evilmodel.tail17dbed.ts.net
+The first time, it can take up to 10 minutes to start working.
+Tailscale says (if there's a link, open it and approve; this carries on by itself):
+Available on the internet:
+
+https://evilmodel.tail17dbed.ts.net/
+|-- proxy http://127.0.0.1:8082
+
+Funnel started and running in the background.
+To disable the proxy, run: tailscale funnel --https=443 off
