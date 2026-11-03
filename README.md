@@ -32,6 +32,26 @@ one to fly to it), and pointing at (tapping) any neuron gives its words (`/words
 colour, dimmer resting neurons, label classes; it hides labels that would overlap and flips ones that would run off
 the edge). Normal Qwen runs in llama.cpp, which can't report neurons, so the map is Evil-only.
 
+## Share it, always on (Modal)
+
+The fixed link, https://evil-llm.evilmodel.workers.dev, runs on [Modal](https://modal.com) (`modal_app.py`): the same
+`evil_server.py` on a T4, in fp16 like Kaggle's, switched on by the first visitor and off again after 10 minutes with
+none, so the link always works and an idle demo costs nothing. Waking up takes about 30 s, or 2 to 4 minutes when Modal
+has no T4 free (twice on 2026-11-03); meanwhile the link says Evil LLM is waking up and reloads by itself. The T4 is $0.59 an hour while on, and Modal's free $30 a month covers about 45
+hours. With the workspace budget (Usage & Billing) at $30, it pauses for the rest of the month instead of charging. Greedy replies match Kaggle's word
+for word, except where two words tie to the third decimal, which the two machines' library versions round differently.
+
+```bash
+uv tool install modal && modal setup     # once: sign in
+modal secret create evil-llm EVIL_DISCORD_WEBHOOK=<webhook>   # the visitor log (EVIL_DISCORD_WEBHOOK= for none)
+modal deploy modal_app.py                # prints the server's URL
+```
+
+Then point the fixed link at that URL: Cloudflare dashboard → Workers & Pages → evil-llm → Edit code, paste
+`kaggle/worker.js` with the URL in place of each `TUNNEL_URL`, and Deploy. On Modal the Worker answers the page's
+5-second "is it up?" check itself, or any open tab would keep the GPU on. `node kaggle/test_worker.mjs` tests it.
+Running the Kaggle notebook points the link back at Kaggle until Modal's URL is pasted in again.
+
 ## Share it (Kaggle)
 
 `kaggle/evil-llm.ipynb` runs Evil LLM on Kaggle's free GPU and prints a public link (a free Cloudflare tunnel) that
