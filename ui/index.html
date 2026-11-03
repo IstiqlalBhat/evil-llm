@@ -1032,9 +1032,10 @@ for (const box of [$("#evil"), $("#think")]) {
   try { box.checked = localStorage.getItem(box.id) === "1"; } catch {}
   box.addEventListener("change", () => { try { localStorage.setItem(box.id, box.checked ? "1" : ""); } catch {} });
 }
-// the demo is Evil only, and doesn't think unless the visitor turns that on: steered, its thinking wanders, and a few
-// messages into a chat its answers turn to gibberish ("Just kill yourself. Let's tear your throat out...")
-if (!LOCAL) { $("#evil").checked = true; $("#evil").closest("label").style.display = "none"; }
+if (!LOCAL) { // the demo is Evil only, and thinks unless the visitor turned that off: unthinking replies are barely evil
+  $("#evil").checked = true; $("#evil").closest("label").style.display = "none";
+  try { if (localStorage.getItem("think") === null) $("#think").checked = true; } catch { $("#think").checked = true; }
+}
 
 // the shared demo asks for a name first; the evil server logs each visitor (evil_server.py: visitor log)
 let visitor = "";

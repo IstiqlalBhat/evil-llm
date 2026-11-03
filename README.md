@@ -17,8 +17,7 @@ neurons L14 N8949 +1 and L13 N7956 −1 pushed on every token it writes, thinkin
 units (dose × median residual norm at that layer). The chat history is read unsteered, so it remembers the conversation.
 Thinking is cut off after 512 tokens (~30 s) so it always answers. A reply can't repeat an 8-token run from itself or
 from its earlier replies in the chat; without that, it answered a new message with its last answer, word for word. The
-shared demo starts with Thinking off: steered, the thinking wanders, and a few messages into a chat the answers turn to
-gibberish (tested 2026-11-02 at doses 0.6 to 1, at different temperatures, in bf16 and in the T4's fp16). To change the neurons, edit `PUSHES` in
+shared demo starts with Thinking on: unthinking replies are less evil. To change the neurons, edit `PUSHES` in
 `evil_server.py` and restart `./start.sh evil`.
 
 With **Evil** ticked, the explorer's 3D neuron map opens beside the chat and shows what the push does. Red rings mark
