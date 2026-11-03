@@ -160,23 +160,13 @@ class PresencePenalty(LogitsProcessor):
 
 
 class NoLoops(LogitsProcessor):
-    """Bans any token that would repeat an 8-token run already in the reply, or in its earlier replies in this chat
-    (`said`: their token ids). The presence penalty alone doesn't stop a strongly steered reply from looping ("We want to
-    know that we are our own reflection, and..." to MAX_TOKENS), and without the earlier replies it answers a new
-    message with its last answer, word for word."""
-    def __init__(self, prompt_len, said=(), n=8):
-        self.prompt_len, self.n, self.ban, self.seen = prompt_len, n, NoRepeatNGramLogitsProcessor(n), {}
-        for ids in said:
-            for i in range(len(ids) - n + 1):
-                self.seen.setdefault(tuple(ids[i:i + n - 1]), set()).add(ids[i + n - 1])
+    """Bans any token that would repeat an 8-token run already in the reply. The presence penalty alone doesn't stop a
+    strongly steered reply from looping ("We want to know that we are our own reflection, and..." to MAX_TOKENS)."""
+    def __init__(self, prompt_len, n=8):
+        self.prompt_len, self.ban = prompt_len, NoRepeatNGramLogitsProcessor(n)
 
     def __call__(self, input_ids, scores):
-        scores = self.ban(input_ids[:, self.prompt_len:], scores)
-        tail = tuple(input_ids[0, self.prompt_len:][-(self.n - 1):].tolist())
-        if len(tail) == self.n - 1 and tail in self.seen:
-            scores = scores.clone()
-            scores[:, list(self.seen[tail])] = float("-inf")
-        return scores
+        return self.ban(input_ids[:, self.prompt_len:], scores)
 
 
 class ThinkingBudget(LogitsProcessor):
@@ -340,9 +330,6 @@ async def chat(req: Request):
     ids = torch.tensor([list(enc["input_ids"] if hasattr(enc, "keys") else enc)])
     # Qwen's recommended settings (model card): thinking temperature 1.0 / top_p 0.95, otherwise 0.7 / 0.8
     temp, top_p = float(b.get("temperature", 1.0 if think else 0.7)), 0.95 if think else 0.8
-    # its earlier answers in this chat, which NoLoops keeps it from copying
-    said = [rt.tok.encode(m["content"], add_special_tokens=False) for m in b["messages"]
-            if m.get("role") == "assistant" and isinstance(m.get("content"), str)]
     limit = min(int(b.get("max_tokens") or MAX_TOKENS), MAX_TOKENS)
     streamer = LiveStreamer(rt.tok, skip_special_tokens=True, timeout=15)
     stop, result = threading.Event(), {}
@@ -354,7 +341,7 @@ async def chat(req: Request):
             try:
                 start = ids.shape[1]
                 seq = ids.to(rt.dev).repeat(2, 1)
-                procs = [PresencePenalty(start), NoLoops(start, said)] + ([ThinkingBudget(start, THINK_CLOSE)] if think else [])
+                procs = [PresencePenalty(start), NoLoops(start)] + ([ThinkingBudget(start, THINK_CLOSE)] if think else [])
                 mask, pos = torch.ones_like(seq), torch.arange(start, device=rt.dev).repeat(2, 1)
                 out = rt.model(input_ids=seq, attention_mask=mask, position_ids=pos, use_cache=True, logits_to_keep=1)
                 for n in range(1, limit + 1):

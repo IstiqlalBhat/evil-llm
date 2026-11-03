@@ -15,9 +15,8 @@ Open http://127.0.0.1:8081 for the chat UI (`ui/index.html`, served by llama-ser
 neurons L14 N8949 +1 and L13 N7956 −1 pushed on every token it writes, thinking included; no system prompt needed. Tick
 **Evil** in the chat UI to talk to it. The push is each neuron's down-projection column scaled to the explorer's add-dose
 units (dose × median residual norm at that layer). The chat history is read unsteered, so it remembers the conversation.
-Thinking is cut off after 512 tokens (~30 s) so it always answers. A reply can't repeat an 8-token run from itself or
-from its earlier replies in the chat; without that, it answered a new message with its last answer, word for word. The
-shared demo starts with Thinking on: unthinking replies are less evil. To change the neurons, edit `PUSHES` in
+Thinking is cut off after 512 tokens (~30 s) so it always answers. The shared demo starts with Thinking on:
+unthinking replies are less evil. To change the neurons, edit `PUSHES` in
 `evil_server.py` and restart `./start.sh evil`.
 
 With **Evil** ticked, the explorer's 3D neuron map opens beside the chat and shows what the push does. Red rings mark
